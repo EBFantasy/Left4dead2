@@ -1,0 +1,63 @@
+// ============================================================
+// 中文说明（请先阅读）
+// 本文件是 Ragdoll Force SourceMod 版的最终参数覆盖层；它在普通 CFG 之后加载。
+// 修改后执行 sm_ragdoll_force_reload_ems，或重新载入地图。
+// 基础关系：最终基础力 = shotgun_force 或 awp_force × 对应特感倍率。
+// damageforce_scale、predeath_velocity_scale 和 entity_velocity_scale 会在不同推力通道继续缩放效果。
+// 多个参数同时提高会产生叠加甚至近似乘法放大；建议每次只改一项，并以 10% 至 15% 为步长测试。
+// enable：有效值 0 或 1；建议 1。0 会关闭插件。
+// shotgun_force：有效范围 0 至 30000；建议 3000 至 16000；默认 7800。
+// awp_force：有效范围 0 至 40000；建议 4000 至 20000；默认 9800。
+// hunter_jockey_mult：有效范围 0 至 8；建议 0.50 至 4.00；默认 2.20。
+// medium_mult：控制 Smoker、Boomer、Spitter 和 Witch；有效范围 0 至 6；建议 0.50 至 3.00；默认 1.55。
+// up_mult：基础垂直抬升倍率；有效范围 0 至 2；建议 0.05 至 0.60；默认 0.24。
+// aim_z_mult：瞄准俯仰对垂直力的影响倍率；有效范围 0 至 2；建议 0 至 1.20；默认 0.70。
+// damageforce_scale：SDKHooks 伤害力缩放；有效范围 0 至 30；建议 1 至 12；默认 6。
+// predeath_push：有效值 0 或 1；建议 1。控制致死帧活体速度推力。
+// predeath_velocity_scale：有效范围 0 至 2；建议 0.05 至 0.65；默认 0.28。
+// entity_push：有效值 0 或 1；建议 1。控制尸体实体生成后的补充推力。
+// entity_velocity_scale：有效范围 0 至 4；建议 0.05 至 0.80；默认 0.32。
+// match_radius：有效范围 32 至 1024；建议 200 至 600；默认 420。过大会把推力匹配到错误尸体。
+// debug：有效值 0 或 1；正常使用建议 0，排查时临时设为 1。
+// 注意：插件只处理受支持武器造成的致死击杀；Charger 和 Tank 仍被排除，EMS 不能解除该限制。
+// 注意：不要与 Ragdoll Force VScript/VPK 版同时启用，否则效果会叠加。
+// 注意：超出有效范围、非数字值和未知键会被忽略，并写入 SourceMod 错误日志。
+// ============================================================
+// English guide
+// This file is the final override layer for the Ragdoll Force SourceMod edition and loads after the normal CFG.
+// Run sm_ragdoll_force_reload_ems after editing, or reload the map.
+// Base relationship: final base force = shotgun_force or awp_force multiplied by the matching infected multiplier.
+// damageforce_scale, predeath_velocity_scale, and entity_velocity_scale further scale separate push channels.
+// Raising several values together compounds the result and may behave approximately multiplicatively. Change one value at a time in 10% to 15% steps.
+// enable: valid 0 or 1; recommended 1. Set 0 to disable the plugin.
+// shotgun_force: valid 0 to 30000; recommended 3000 to 16000; default 7800.
+// awp_force: valid 0 to 40000; recommended 4000 to 20000; default 9800.
+// hunter_jockey_mult: valid 0 to 8; recommended 0.50 to 4.00; default 2.20.
+// medium_mult: affects Smoker, Boomer, Spitter, and Witch; valid 0 to 6; recommended 0.50 to 3.00; default 1.55.
+// up_mult: base vertical lift multiplier; valid 0 to 2; recommended 0.05 to 0.60; default 0.24.
+// aim_z_mult: vertical aim contribution multiplier; valid 0 to 2; recommended 0 to 1.20; default 0.70.
+// damageforce_scale: SDKHooks damage-force scale; valid 0 to 30; recommended 1 to 12; default 6.
+// predeath_push: valid 0 or 1; recommended 1. Controls lethal-frame living-entity velocity.
+// predeath_velocity_scale: valid 0 to 2; recommended 0.05 to 0.65; default 0.28.
+// entity_push: valid 0 or 1; recommended 1. Controls the post-spawn ragdoll-entity fallback push.
+// entity_velocity_scale: valid 0 to 4; recommended 0.05 to 0.80; default 0.32.
+// match_radius: valid 32 to 1024; recommended 200 to 600; default 420. Excessive values can match the wrong ragdoll.
+// debug: valid 0 or 1; recommended 0 normally and 1 only while diagnosing.
+// Note: only lethal kills from supported weapons are handled. Charger and Tank remain excluded and EMS cannot remove that restriction.
+// Note: do not enable the Ragdoll Force VScript/VPK edition at the same time because the effects will stack.
+// Note: out-of-range values, non-numeric values, and unknown keys are ignored and logged by SourceMod.
+// ============================================================
+enable 1
+shotgun_force 7800.0
+awp_force 9800.0
+hunter_jockey_mult 2.20
+medium_mult 1.55
+up_mult 0.24
+aim_z_mult 0.70
+damageforce_scale 6.0
+predeath_push 1
+predeath_velocity_scale 0.28
+entity_push 1
+entity_velocity_scale 0.32
+match_radius 420.0
+debug 0

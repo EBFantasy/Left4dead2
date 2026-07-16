@@ -1,0 +1,24 @@
+Third-party components in Windows release packages
+==================================================
+
+This source directory does not contain the MetaMod:Source or SourceMod runtime.
+The complete Windows packages published as GitHub Release assets bundle the
+tested third-party runtime versions listed below for installation convenience.
+
+MetaMod:Source
+- Bundled Windows version: 1.12.0-dev+1224
+- Project website: https://www.sourcemm.net/
+- Download page: https://www.sourcemm.net/downloads.php
+
+SourceMod
+- Bundled version: 1.12.0.7239
+- Project website: https://www.sourcemod.net/
+- Download page: https://www.sourcemod.net/downloads.php
+- License information is included in the Windows package at:
+  - addons/sourcemod/LICENSE.txt
+  - addons/sourcemod/GPLv2.txt
+  - addons/sourcemod/GPLv3.txt
+
+These components are bundled only to provide the documented Windows local-server
+installation. Ragdoll Force itself is authored by EpicBF and is licensed under
+GPL-3.0-or-later. See LICENSE in this source directory.
