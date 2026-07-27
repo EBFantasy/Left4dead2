@@ -1,0 +1,36 @@
+// ============================================================
+// [TEST] Weapon Inspect Ammo Check 1.0.0
+// File: left4dead2/ems/ebf_inspect_ammo/settings.txt
+//
+// Syntax: one "key value" pair per line. // starts a comment.
+// After editing, change level or run in the console:
+//     script EBFInspectAmmo.Reload()
+//
+// enable          0 or 1. Master switch. Default 1.
+// require_use     0 or 1. 1 = hold E while tapping R. Default 1.
+//                 0 makes R alone inspect, which fights with normal
+//                 reloading. Leave this at 1 unless you are testing.
+// output_chat     0 or 1. Ammo line in the chat area. Default 1.
+// output_center   0 or 1. Ammo line at screen center. Default 1.
+// play_animation  0 or 1. Drive the weapon's reload/inspect animation.
+//                 Custom weapon models that ship an inspect animation
+//                 will show it. Stock models show their reload. Default 1.
+// block_reload    0 or 1. Abort the real reload and restore clip and
+//                 reserve ammo from a snapshot. Default 1.
+// guard_ticks     1 to 40. Frames the snapshot is enforced. Default 8.
+//                 Raise it if a very slow custom reload still slips through.
+// cooldown        0.0 to 10.0. Seconds between inspects. Default 1.20.
+// melee_ok        0 or 1. Allow inspecting melee and clipless items.
+//                 Default 1.
+// debug           0 or 1. Verbose console diagnostics. Default 0.
+// ============================================================
+enable 1
+require_use 1
+output_chat 1
+output_center 1
+play_animation 1
+block_reload 1
+guard_ticks 8
+cooldown 1.20
+melee_ok 1
+debug 0

@@ -1,0 +1,189 @@
+# [TEST] Weapon Inspect Ammo Check
+
+Current version: `1.0.0`. **This is a test project.**
+
+A standalone Left 4 Dead 2 **VScript addon**. Hold **E** and tap **R** to
+"inspect" the weapon in your hands:
+
+- the weapon plays its own **reload / inspect animation**,
+- the **remaining ammo** is printed to chat and to the centre of the screen,
+- **no reload happens** — clip and reserve ammo are unchanged.
+
+No MetaMod, no SourceMod, no `-insecure`. Just one `.vpk` in your addons
+folder.
+
+> Chinese version: [README_zh-CN.md](README_zh-CN.md) ·
+> Design and debugging notes: [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md)
+
+---
+
+## Install
+
+### Option A — build the VPK on Windows (recommended)
+
+1. Download or clone this folder.
+2. Double-click **`build_vpk.bat`**.
+   It finds `vpk.exe` in your Left 4 Dead 2 install, packs the `addon` folder,
+   and produces `ebf_inspect_ammo_test.vpk`.
+3. Copy that file into:
+
+   ```text
+   ...\Steam\steamapps\common\Left 4 Dead 2\left4dead2\addons\
+   ```
+
+4. Start the game. The addon appears in the in-game **Add-ons** list.
+
+### Option B — pack manually
+
+Drag the **`addon`** folder onto `Left 4 Dead 2\bin\vpk.exe`. That produces
+`addon.vpk`; rename it to something descriptive and copy it to `left4dead2\addons\`.
+
+> The VPK's internal layout must be exactly this — `scripts` at the root:
+>
+> ```text
+> addoninfo.txt
+> scripts/vscripts/mapspawn_addon.nut
+> scripts/vscripts/ebf_inspect_ammo.nut
+> ```
+>
+> If you pack the *parent* folder by mistake, the game will not find the
+> scripts.
+
+### Option C — loose files (no VPK, for quick testing)
+
+Copy the two `.nut` files to:
+
+```text
+...\Left 4 Dead 2\left4dead2\scripts\vscripts\
+```
+
+Note that `mapspawn_addon.nut` is a shared filename — if another loose script
+already uses it, merge the contents rather than overwriting.
+
+---
+
+## Use
+
+In game, hold **E** and tap **R**.
+
+- Chat shows: `[Inspect] AK-47: 17/40  |  reserve 200`
+- The same line appears at screen centre.
+- The weapon plays its reload/inspect animation, and **no ammo is used**.
+
+Because vanilla L4D2 has no inspect animations, stock weapons will show their
+**reload** animation. Custom weapon models that ship an inspect animation show
+that instead. This is a model limitation, not a script one — see
+[TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) §5.
+
+---
+
+## Verify it is working
+
+Open the developer console. On load you should see:
+
+```text
+[InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
+[InspectAmmo] Manager entity active (index NN).
+[InspectAmmo] Version 1.0.0 ready. Hold E and tap R to inspect.
+```
+
+Diagnostic commands:
+
+| Command | What it does |
+|---|---|
+| `script EBFInspectAmmo.Status()` | Dumps settings, your current weapon, its ammo, the viewmodel path, and **which animations that model actually has**. |
+| `script EBFInspectAmmo.TestFire()` | Performs one inspect on you with verbose output — proves the script works without the key combo. |
+| `script EBFInspectAmmo.Reload()` | Re-reads the settings file without changing level. |
+
+---
+
+## Configuration
+
+Created automatically on first run:
+
+```text
+left4dead2\ems\ebf_inspect_ammo\settings.txt
+```
+
+A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
+
+| Key | Range | Default | Meaning |
+|---|---|---|---|
+| `enable` | 0/1 | 1 | Master switch. |
+| `require_use` | 0/1 | 1 | 1 = must hold E. 0 = R alone (interferes with reloading). |
+| `output_chat` | 0/1 | 1 | Print ammo to the chat area. |
+| `output_center` | 0/1 | 1 | Print ammo at screen centre. |
+| `play_animation` | 0/1 | 1 | Drive the reload/inspect animation. |
+| `block_reload` | 0/1 | 1 | Abort the real reload and restore ammo. |
+| `guard_ticks` | 1–40 | 8 | Frames the ammo snapshot is enforced. |
+| `cooldown` | 0.0–10.0 | 1.20 | Seconds between inspects. |
+| `melee_ok` | 0/1 | 1 | Allow inspecting melee / clipless items. |
+| `debug` | 0/1 | 0 | Verbose console diagnostics. |
+
+Invalid values are rejected individually with a console warning, and the
+default is kept — a typo cannot break the addon. After editing, run
+`script EBFInspectAmmo.Reload()` or change level.
+
+---
+
+## Multiplayer
+
+VScript runs **server-side**:
+
+- **You host (local/listen server):** works for you and everyone connected.
+- **Someone else's server:** that server must have the addon installed. A
+  client-side VPK cannot add server behaviour.
+- **Dedicated server:** place the VPK in the server's `left4dead2/addons/`.
+
+---
+
+## Compatibility
+
+Loads through `mapspawn_addon.nut`, the sanctioned auto-run hook that runs
+*alongside* stock scripts. It does **not** replace `scriptedmode.nut`,
+`mapspawn.nut`, or `director_base.nut`, so it coexists with map fixes, the
+Community Update, and other script addons.
+
+If you also run another inspect addon, disable one of them — otherwise both
+will react to the same keypress.
+
+---
+
+## Uninstall
+
+Delete the `.vpk` from `left4dead2\addons\`. Optionally remove
+`left4dead2\ems\ebf_inspect_ammo\`.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| No `[InspectAmmo]` console lines | VPK not loaded. Check it is directly in `left4dead2\addons\` and enabled in the Add-ons list. |
+| `FAILED to include ebf_inspect_ammo.nut` | Packed from the wrong folder; `scripts/` must be at the VPK root. |
+| Ammo prints but nothing animates | The model has no inspect/reload sequence. Confirm with `Status()`. |
+| Nothing happens on E+R | You may be on someone else's server. Try `TestFire()`. |
+| It really reloads | Set `debug 1`, watch for `aborted a real reload`, and raise `guard_ticks`. |
+
+More detail in [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) §8.
+
+---
+
+## Layout
+
+```text
+addon/
+  addoninfo.txt                          Workshop / add-on list metadata
+  scripts/vscripts/mapspawn_addon.nut    Loader (runs every map)
+  scripts/vscripts/ebf_inspect_ammo.nut  All logic
+build_vpk.bat                            One-click Windows VPK builder
+reference/ems/ebf_inspect_ammo/settings.txt   Copy of the generated settings
+TECHNICAL_NOTES.md                       Design rationale + debugging notes
+README.md / README_zh-CN.md
+```
+
+## License
+
+GNU General Public License v3.0 or later (`GPL-3.0-or-later`), matching the
+other project in this repository.
