@@ -23,8 +23,8 @@ folder.
 
 1. Download or clone this folder.
 2. Double-click **`build_vpk.bat`**.
-   It finds `vpk.exe` in your Left 4 Dead 2 install, packs the `addon` folder,
-   and produces `ebf_inspect_ammo_test.vpk`.
+   It finds `vpk.exe` in your Left 4 Dead 2 install, packs the source folder,
+   and produces `test_ammo_inspect.vpk`.
 3. Copy that file into:
 
    ```text
@@ -35,8 +35,13 @@ folder.
 
 ### Option B — pack manually
 
-Drag the **`addon`** folder onto `Left 4 Dead 2\bin\vpk.exe`. That produces
-`addon.vpk`; rename it to something descriptive and copy it to `left4dead2\addons\`.
+Drag the **`test_ammo_inspect`** folder onto `Left 4 Dead 2\bin\vpk.exe`.
+`vpk.exe` writes `test_ammo_inspect.vpk` next to the folder you dragged. Copy
+it to `left4dead2\addons\`.
+
+That is all there is to it — **only the source folder gets packed**. The
+`README`, `TECHNICAL_NOTES.md`, `LICENSE`, `build_vpk.bat` and `reference/`
+folder stay out of the VPK; they are repository documentation, not game content.
 
 > The VPK's internal layout must be exactly this — `scripts` at the root:
 >
@@ -48,6 +53,18 @@ Drag the **`addon`** folder onto `Left 4 Dead 2\bin\vpk.exe`. That produces
 >
 > If you pack the *parent* folder by mistake, the game will not find the
 > scripts.
+
+#### Renaming the folder
+
+You can rename `test_ammo_inspect` to anything you like. The VPK takes its
+name from the folder, and nothing inside the scripts depends on that name —
+only the internal `scripts/vscripts/...` layout matters. `build_vpk.bat`
+auto-detects the source folder (it looks for whichever neighbouring folder
+contains `addoninfo.txt`), so it keeps working after a rename.
+
+The name shown in the in-game Add-ons list comes from `addontitle` inside
+`addoninfo.txt`, not from the filename, so change that too if you want the
+list entry to match.
 
 ### Option C — loose files (no VPK, for quick testing)
 
@@ -173,15 +190,20 @@ More detail in [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) §8.
 ## Layout
 
 ```text
-addon/
+test_ammo_inspect/                       <- THIS is what gets packed into the VPK
   addoninfo.txt                          Workshop / add-on list metadata
   scripts/vscripts/mapspawn_addon.nut    Loader (runs every map)
   scripts/vscripts/ebf_inspect_ammo.nut  All logic
+
 build_vpk.bat                            One-click Windows VPK builder
 reference/ems/ebf_inspect_ammo/settings.txt   Copy of the generated settings
 TECHNICAL_NOTES.md                       Design rationale + debugging notes
 README.md / README_zh-CN.md
+LICENSE
 ```
+
+Everything below the blank line is repository documentation and is **not**
+part of the VPK.
 
 ## License
 

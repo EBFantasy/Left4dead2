@@ -2,8 +2,12 @@
 REM ============================================================================
 REM  [TEST] Weapon Inspect Ammo Check -- Windows VPK build script
 REM
-REM  Produces  ebf_inspect_ammo_test.vpk  from the "addon" folder next to this
-REM  script, then tells you where to copy it.
+REM  Packs the addon source folder into a .vpk and tells you where to copy it.
+REM
+REM  The source folder is auto-detected: it is whichever folder next to this
+REM  script contains addoninfo.txt. So you may freely rename "addon" to
+REM  anything you like (e.g. test_ammo_inspect) and this script still works.
+REM  The resulting .vpk is named after that folder.
 REM
 REM  Usage: just double-click this file.
 REM ============================================================================
@@ -11,25 +15,44 @@ REM ============================================================================
 setlocal enabledelayedexpansion
 
 set "HERE=%~dp0"
-set "SRC=%HERE%addon"
 
 echo.
 echo  [TEST] Weapon Inspect Ammo Check -- VPK builder
 echo  ------------------------------------------------
 
-if not exist "%SRC%\addoninfo.txt" (
-	echo  ERROR: "%SRC%\addoninfo.txt" not found.
-	echo  Run this script from inside the project folder.
+REM --- Locate the source folder (any subfolder holding addoninfo.txt) --------
+set "SRC="
+set "SRCNAME="
+set "FOUNDCOUNT=0"
+
+for /d %%D in ("%HERE%*") do (
+	if exist "%%~fD\addoninfo.txt" (
+		set /a FOUNDCOUNT+=1
+		set "SRC=%%~fD"
+		set "SRCNAME=%%~nxD"
+	)
+)
+
+if %FOUNDCOUNT%==0 (
+	echo  ERROR: No source folder found.
+	echo  Expected a subfolder next to this script containing addoninfo.txt.
 	goto :fail
 )
 
+if %FOUNDCOUNT% GTR 1 (
+	echo  ERROR: Found %FOUNDCOUNT% folders containing addoninfo.txt.
+	echo  Keep only one addon source folder next to this script.
+	goto :fail
+)
+
+REM --- Sanity-check the required layout -------------------------------------
 if not exist "%SRC%\scripts\vscripts\ebf_inspect_ammo.nut" (
-	echo  ERROR: scripts\vscripts\ebf_inspect_ammo.nut is missing.
+	echo  ERROR: "%SRCNAME%\scripts\vscripts\ebf_inspect_ammo.nut" is missing.
 	goto :fail
 )
 
 if not exist "%SRC%\scripts\vscripts\mapspawn_addon.nut" (
-	echo  ERROR: scripts\vscripts\mapspawn_addon.nut is missing.
+	echo  ERROR: "%SRCNAME%\scripts\vscripts\mapspawn_addon.nut" is missing.
 	goto :fail
 )
 
@@ -59,27 +82,27 @@ if not exist "%VPK%" (
 )
 
 echo  Using vpk.exe : %VPK%
-echo  Packing       : %SRC%
+echo  Source folder : %SRCNAME%
+echo  Output        : %SRCNAME%.vpk
 echo.
 
-if exist "%HERE%addon.vpk" del /q "%HERE%addon.vpk"
-if exist "%HERE%ebf_inspect_ammo_test.vpk" del /q "%HERE%ebf_inspect_ammo_test.vpk"
+REM vpk.exe writes "<foldername>.vpk" into the PARENT of the packed folder,
+REM which is this script's folder.
+if exist "%HERE%%SRCNAME%.vpk" del /q "%HERE%%SRCNAME%.vpk"
 
 "%VPK%" "%SRC%"
 
-if not exist "%HERE%addon.vpk" (
+if not exist "%HERE%%SRCNAME%.vpk" (
 	echo.
-	echo  ERROR: vpk.exe did not produce addon.vpk.
+	echo  ERROR: vpk.exe did not produce "%SRCNAME%.vpk".
 	goto :fail
 )
-
-ren "%HERE%addon.vpk" "ebf_inspect_ammo_test.vpk"
 
 echo.
 echo  ------------------------------------------------
 echo   SUCCESS
 echo.
-echo   Built: %HERE%ebf_inspect_ammo_test.vpk
+echo   Built: %HERE%%SRCNAME%.vpk
 echo.
 echo   Now copy that .vpk into:
 echo     ...\Steam\steamapps\common\Left 4 Dead 2\left4dead2\addons\

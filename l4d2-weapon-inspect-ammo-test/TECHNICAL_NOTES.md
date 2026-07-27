@@ -2,7 +2,7 @@
 
 This file records *why* the addon is built the way it is, which alternatives
 were rejected, and what to check first when something misbehaves. It is meant
-to be read alongside `addon/scripts/vscripts/ebf_inspect_ammo.nut`.
+to be read alongside `test_ammo_inspect/scripts/vscripts/ebf_inspect_ammo.nut`.
 
 ---
 

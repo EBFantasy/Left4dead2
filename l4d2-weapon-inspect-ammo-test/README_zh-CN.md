@@ -23,8 +23,8 @@ addons 文件夹即可。
 
 1. 下载或克隆本文件夹。
 2. 双击 **`build_vpk.bat`**。
-   脚本会自动在你的《求生之路 2》安装目录里找到 `vpk.exe`，打包 `addon` 文件夹，
-   生成 `ebf_inspect_ammo_test.vpk`。
+   脚本会自动在你的《求生之路 2》安装目录里找到 `vpk.exe`，打包源文件夹，
+   生成 `test_ammo_inspect.vpk`。
 3. 把生成的文件复制到：
 
    ```text
@@ -35,8 +35,12 @@ addons 文件夹即可。
 
 ### 方式 B —— 手动打包
 
-把 **`addon`** 文件夹直接拖到 `Left 4 Dead 2\bin\vpk.exe` 上，会生成
-`addon.vpk`，重命名后复制到 `left4dead2\addons\` 即可。
+把 **`test_ammo_inspect`** 文件夹直接拖到 `Left 4 Dead 2\bin\vpk.exe` 上即可。
+`vpk.exe` 会在被拖文件夹的**同级目录**生成 `test_ammo_inspect.vpk`，复制到
+`left4dead2\addons\` 就行。
+
+**只需要打包这一个源文件夹。** `README`、`TECHNICAL_NOTES.md`、`LICENSE`、
+`build_vpk.bat` 和 `reference/` 都不要放进 VPK —— 它们是仓库文档，不是游戏内容。
 
 > VPK 内部结构必须是下面这样，`scripts` 位于根目录：
 >
@@ -46,7 +50,18 @@ addons 文件夹即可。
 > scripts/vscripts/ebf_inspect_ammo.nut
 > ```
 >
-> 如果误把**上一级**文件夹打包进去，游戏将找不到脚本。
+> 如果误把**上一级**文件夹（也就是 `l4d2-weapon-inspect-ammo-test` 本身）拖上去，
+> 游戏将找不到脚本。
+
+#### 关于给文件夹改名
+
+**可以随便改。** VPK 的文件名就取自被拖的文件夹名，而脚本内部完全不依赖这个名字，
+只依赖内部的 `scripts/vscripts/...` 结构。`build_vpk.bat` 也做了自动识别（它会找
+同级目录里含 `addoninfo.txt` 的那个文件夹），改名后照样能用。
+
+需要注意：游戏内**附加内容列表里显示的名称**来自 `addoninfo.txt` 里的
+`addontitle` 字段，不是文件名。如果希望列表里显示的名字也跟着变，请一并修改
+`addontitle`。
 
 ### 方式 C —— 散装文件（不打包，快速测试用）
 
@@ -168,15 +183,19 @@ VScript 运行在**服务端**：
 ## 目录结构
 
 ```text
-addon/
+test_ammo_inspect/                       <- 只有这个文件夹会被打包进 VPK
   addoninfo.txt                          创意工坊 / 附加内容列表信息
   scripts/vscripts/mapspawn_addon.nut    加载器（每张地图运行）
   scripts/vscripts/ebf_inspect_ammo.nut  全部逻辑
+
 build_vpk.bat                            Windows 一键打包脚本
 reference/ems/ebf_inspect_ammo/settings.txt   生成的设置文件副本
 TECHNICAL_NOTES.md                       设计思路与排查记录
 README.md / README_zh-CN.md
+LICENSE
 ```
+
+空行以下的内容都是仓库文档，**不会**进入 VPK。
 
 ## 许可
 
