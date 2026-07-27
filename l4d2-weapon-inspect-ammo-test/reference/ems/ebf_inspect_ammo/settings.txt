@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.3.0
+// [TEST] Weapon Inspect Ammo Check 1.4.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -8,7 +8,27 @@
 //
 // enable          0 or 1. Master switch. Default 1.
 //
-// key             Which key inspects: alt1 | alt2 | zoom | reload.
+// trigger         How to inspect: combo | key | chat. Default combo.
+//                 combo - hold a chord of keys you already own.
+//                         Needs NO bind and takes no bindable key
+//                         away from your other script mods.
+//                 key   - a single trigger key (see 'key' below).
+//                 chat  - chat command only.
+//                 The chat command below ALWAYS works as well.
+// combo           Chord for trigger=combo. Default duck+speed,
+//                 i.e. hold Ctrl and Shift together.
+//                 Valid names, join with +:
+//                   duck (Ctrl)  speed (Shift)  zoom  use (E)
+//                   reload (R)   jump (Space)   attack2 (RMB)
+//                   alt1  alt2
+//                 Examples:  duck+speed   duck+zoom   speed+attack2
+// hold_time       0.0 to 3.0. Seconds the chord must be held before
+//                 it fires. Default 0.45, so ordinary crouch-walking
+//                 does not trigger it. Lower it for a snappier feel.
+// chat_command    Chat text that inspects. Default !ammo.
+//                 Always active, cannot conflict with any bind.
+//
+// key             Used when trigger = key: alt1 | alt2 | zoom | reload.
 //                 Default alt1. alt1/alt2 are UNBOUND in vanilla L4D2,
 //                 so they clash with nothing. Bind one in the console:
 //                     bind v "+alt1"
@@ -42,6 +62,10 @@
 // debug           0 or 1. Verbose console diagnostics. Default 0.
 // ============================================================
 enable 1
+trigger combo
+combo duck+speed
+hold_time 0.45
+chat_command !ammo
 key alt1
 modifier none
 require_use 0

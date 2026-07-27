@@ -1,8 +1,8 @@
 # [TEST] 武器检视弹药查看
 
-当前版本：`1.3.0`。**这是一个测试性质的项目。**
+当前版本：`1.4.0`。**这是一个测试性质的项目。**
 
-一个独立的《求生之路 2》**VScript 插件（VPK）**。绑定一个专用键后轻点一下，即可“检视”手中的武器：
+一个独立的《求生之路 2》**VScript 插件（VPK）**。**同时按住 Ctrl + Shift**（或在聊天栏输入 `!ammo`），即可“检视”手中的武器：
 
 - 武器播放它自己的**换弹 / 检视动作**；
 - **剩余弹药量**同时输出到聊天栏和屏幕正中；
@@ -77,28 +77,35 @@ addons 文件夹即可。
 
 ## 使用
 
-**第一次使用需要绑定一个键。** 打开控制台执行（V 键可换成你喜欢的任意键）：
+**开箱即用，不需要绑定任何按键。**
+
+游戏中**同时按住 Ctrl + Shift 约 0.45 秒**即可检视。
+
+或者在聊天栏输入：
 
 ```text
-bind v "+alt1"
+!ammo
 ```
 
-之后在游戏中**轻点 V** 即可。想永久生效，把上面这行写进
-`left4dead2\cfg\autoexec.cfg`。
+> **为什么用组合键而不是 `+alt1`？**
+> `+alt1`、`+alt2` 这类"空闲"输入位，在重度脚本/mod 玩家手上基本都被占用了。
+> 而 Ctrl 和 Shift 是移动键，**不占用任何可绑定键位**，不会和你现有的脚本 mod 抢
+> 资源。单独按 Ctrl（下蹲）或单独按 Shift（行走）都不会触发，必须两个键**同时按住**
+> 超过 `hold_time` 才会触发，所以正常蹲走不会误触发。
 
-> 为什么用 `+alt1`：它是《求生之路 2》内建但**默认完全没有绑定**的命令，不会和任何
-> 原版操作冲突。用专用单键也彻底解决了 E+R 的时序问题 —— 没有修饰键需要"按住"，
-> 也不用和换弹键抢同一个按键，轻点和长按效果完全一致。
+如果你觉得 Ctrl+Shift 不顺手，可以在配置里改成任意组合，例如：
 
-- 聊天栏显示：`[Inspect] AK-47: 17/40  |  reserve 200`
-- 屏幕正中显示同样的内容。
-- 武器播放换弹/检视动作，且**不消耗任何弹药**。
+```text
+combo duck+zoom          // Ctrl + 右键瞄准
+combo speed+attack2      // Shift + 鼠标右键
+```
 
-由于原版《求生之路 2》本身没有检视动作，原版武器会播放它的**换弹**动作；
-自带检视动作的创意工坊武器模型则会播放该检视动作。这是模型层面的限制，不是脚本
-的问题，详见 [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) 第 5 节。
+也可以改回单键模式（如果你确实有空闲键）：
 
----
+```text
+trigger key
+key alt1
+```
 
 ## 确认脚本已生效
 
@@ -107,7 +114,7 @@ bind v "+alt1"
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.3.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.4.0 ready. Hold E and tap R to inspect.
 ```
 
 诊断命令：
@@ -133,8 +140,12 @@ left4dead2\ems\ebf_inspect_ammo\settings.txt
 | 键名 | 有效范围 | 默认值 | 说明 |
 |---|---|---|---|
 | `enable` | 0/1 | 1 | 总开关。 |
-| `key` | alt1/alt2/zoom/reload | alt1 | 触发键。alt1、alt2 在原版中未绑定，推荐。 |
-| `modifier` | none/use/duck/speed | none | 需额外按住的键。use=E，duck=Ctrl，speed=Shift。 |
+| `trigger` | combo/key/chat | combo | 触发方式。combo=组合键（无需绑定），key=单键，chat=仅聊天。 |
+| `combo` | 见下 | duck+speed | 组合键。可用名：duck(Ctrl)、speed(Shift)、zoom、use(E)、reload(R)、jump、attack2(右键)、alt1、alt2，用 `+` 连接。 |
+| `hold_time` | 0.0–3.0 | 0.45 | 组合键需按住多久才触发，防止误触。 |
+| `chat_command` | 任意文本 | !ammo | 聊天命令，**任何模式下都有效**，绝不冲突。 |
+| `key` | alt1/alt2/zoom/reload | alt1 | 仅 trigger=key 时使用。 |
+| `modifier` | none/use/duck/speed | none | 仅 trigger=key 时的额外按键。 |
 | `require_use` | 0/1 | 0 | 旧版兼容：设为 1 可恢复 E+R（不推荐，快速点按仍可能真换弹）。 |
 | `output_chat` | 0/1 | 1 | 在聊天栏输出弹药量。 |
 | `output_center` | 0/1 | 1 | 在屏幕正中输出弹药量。 |
@@ -185,8 +196,8 @@ VScript 运行在**服务端**：
 | 控制台完全没有 `[InspectAmmo]` 字样 | VPK 没被加载。确认它直接放在 `left4dead2\addons\` 下，并在附加内容列表中已启用。 |
 | 出现 `FAILED to include ebf_inspect_ammo.nut` | 打包目录错了，`scripts/` 必须位于 VPK 根目录。 |
 | 弹药能显示但没有动作 | 该模型没有检视/换弹序列，用 `Status()` 确认。 |
-| 按键毫无反应 | 先确认已执行 `bind v "+alt1"`。也可能是在别人的服务器上（见上文）。可用 `TestFire()` 验证。 |
-| 真的换弹了 | 执行 `Status()` 查看 `trigger key` 是否为 alt1。若检视动画很长被中途打断，调大 `spoof_time`。 |
+| 组合键没反应 | 先在聊天栏试 `!ammo`：若聊天能用说明脚本正常，是组合键被占用或按得不够久。执行 `Status()` 查看 `combo now`。也可能是在别人的服务器上。 |
+| 真的换弹了 | 执行 `Status()` 查看 `trigger mode`。若检视动画很长被中途打断，调大 `spoof_time`。 |
 
 更详细的说明见 [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) 第 8 节。
 

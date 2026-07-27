@@ -70,7 +70,31 @@ second execution it re-arms the think entity instead of building a second one.
 
 ## 4. Reading the input
 
-### Why a dedicated key, not E+R
+### Why a chord, not a dedicated key
+
+v1.3.0 used `+alt1`. That was wrong for the target audience: `+alt1` and
+`+alt2` are exactly the bits heavy script-mod users have *already* bound, which
+is why so many published L4D2 script mods use long-press or chord triggers
+instead of claiming a spare bit.
+
+There are only ~20 `IN_` bits and essentially all of them are either standard
+controls or already contested. Rather than fight over one, v1.4.0 stops
+consuming a bindable key at all:
+
+- **Chord (default):** hold `duck+speed` (Ctrl+Shift) for `hold_time`
+  (default 0.45 s). Both are movement keys that every player already has and
+  no script mod binds, because they are not *bindable targets* — they are
+  existing actions. Pressing either alone does nothing, and the hold delay
+  means ordinary crouch-walking never fires it. Any chord is configurable.
+- **Chat command (always on):** `!ammo`. Typed, not bound, so it cannot
+  collide with anything. This is the guaranteed escape hatch.
+- **Single key (opt-in):** `trigger key` restores the v1.3.0 behaviour for
+  anyone who does have a spare bit.
+
+The chord is edge-triggered on the *hold*, not the press: `comboFired` latches
+so holding the keys does not repeat, and it resets only when the chord breaks.
+
+### Why not E+R
 
 The first three versions used **E + R**. It worked, but only if the player
 held E, tapped R, and kept holding E for a while afterwards. Real testing

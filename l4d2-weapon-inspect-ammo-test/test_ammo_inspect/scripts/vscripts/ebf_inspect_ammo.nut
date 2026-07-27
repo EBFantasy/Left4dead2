@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.3.0";
+EBFInspectAmmo.VERSION <- "1.4.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -75,9 +75,29 @@ EBFInspectAmmo.SETTINGS_PATH <- "ebf_inspect_ammo/settings.txt";
 //-----------------------------------------------------------------------------
 EBFInspectAmmo.Settings <- {
 	enable = 1            // Master switch.
-	key = "alt1"          // Trigger key: alt1 | alt2 | zoom | reload.
+	// Trigger mode: how the inspect is requested.
+	//   combo   - hold a chord of movement keys (default, no binds needed)
+	//   key     - a single trigger key (see "key" below)
+	//   chat    - type the chat command only
+	// Chat always works as a fallback regardless of this setting.
+	trigger = "combo"
+
+	// Chord used when trigger = combo. Any two or more of:
+	//   duck (Ctrl) | speed (Shift) | zoom | use (E) | reload (R) | jump
+	// Default duck+speed: crouch-walking is harmless, and neither key is ever
+	// consumed by script mods the way +alt1 is.
+	combo = "duck+speed"
+
+	// Seconds the chord must be held before it fires. Prevents accidental
+	// triggers while crouch-walking normally.
+	hold_time = 0.45
+
+	// Chat command that also triggers an inspect. Type it in chat.
+	chat_command = "!ammo"
+
+	key = "alt1"          // Trigger key when trigger = key.
 	modifier = "none"     // Extra key to hold: none | use | duck | speed.
-	require_use = 0       // Legacy: 1 forces modifier=use (E+R behaviour).
+	require_use = 0       // Legacy: 1 forces the old E+R behaviour.
 	output_chat = 1       // Print the ammo line to the chat area.
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
@@ -96,6 +116,7 @@ EBFInspectAmmo.Bounds <- {
 	play_animation = [0, 1]
 	block_reload = [0, 1]
 	spoof_time = [0.5, 10.0]
+	hold_time = [0.0, 3.0]
 	cooldown = [0.0, 10.0]
 	melee_ok = [0, 1]
 	debug = [0, 1]
@@ -103,12 +124,16 @@ EBFInspectAmmo.Bounds <- {
 
 // Settings whose value is a word, not a number.
 EBFInspectAmmo.StringKeys <- {
+	trigger = ["combo", "key", "chat"]
 	key = ["alt1", "alt2", "zoom", "reload"]
 	modifier = ["none", "use", "duck", "speed"]
 };
 
+// Free-form string settings (validated separately, not against a list).
+EBFInspectAmmo.FreeStringKeys <- { combo = 1, chat_command = 1 };
+
 // Keys that stay floats; everything else is coerced to int.
-EBFInspectAmmo.FloatKeys <- { cooldown = 1, spoof_time = 1 };
+EBFInspectAmmo.FloatKeys <- { cooldown = 1, spoof_time = 1, hold_time = 1 };
 
 // Pristine copy of the defaults, so a reload reverts any key that was removed
 // from the settings file instead of silently keeping the previous value.
@@ -199,7 +224,27 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//\n" +
 		"// enable          0 or 1. Master switch. Default 1.\n" +
 		"//\n" +
-		"// key             Which key inspects: alt1 | alt2 | zoom | reload.\n" +
+		"// trigger         How to inspect: combo | key | chat. Default combo.\n" +
+		"//                 combo - hold a chord of keys you already own.\n" +
+		"//                         Needs NO bind and takes no bindable key\n" +
+		"//                         away from your other script mods.\n" +
+		"//                 key   - a single trigger key (see 'key' below).\n" +
+		"//                 chat  - chat command only.\n" +
+		"//                 The chat command below ALWAYS works as well.\n" +
+		"// combo           Chord for trigger=combo. Default duck+speed,\n" +
+		"//                 i.e. hold Ctrl and Shift together.\n" +
+		"//                 Valid names, join with +:\n" +
+		"//                   duck (Ctrl)  speed (Shift)  zoom  use (E)\n" +
+		"//                   reload (R)   jump (Space)   attack2 (RMB)\n" +
+		"//                   alt1  alt2\n" +
+		"//                 Examples:  duck+speed   duck+zoom   speed+attack2\n" +
+		"// hold_time       0.0 to 3.0. Seconds the chord must be held before\n" +
+		"//                 it fires. Default 0.45, so ordinary crouch-walking\n" +
+		"//                 does not trigger it. Lower it for a snappier feel.\n" +
+		"// chat_command    Chat text that inspects. Default !ammo.\n" +
+		"//                 Always active, cannot conflict with any bind.\n" +
+		"//\n" +
+		"// key             Used when trigger = key: alt1 | alt2 | zoom | reload.\n" +
 		"//                 Default alt1. alt1/alt2 are UNBOUND in vanilla L4D2,\n" +
 		"//                 so they clash with nothing. Bind one in the console:\n" +
 		"//                     bind v \"+alt1\"\n" +
@@ -234,6 +279,10 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"// debug           0 or 1. Verbose console diagnostics. Default 0.\n" +
 		"// ============================================================\n" +
 		"enable 1\n" +
+		"trigger combo\n" +
+		"combo duck+speed\n" +
+		"hold_time 0.45\n" +
+		"chat_command !ammo\n" +
 		"key alt1\n" +
 		"modifier none\n" +
 		"require_use 0\n" +
@@ -301,6 +350,14 @@ EBFInspectAmmo.LoadSettings <- function ()
 		if (!(key in Settings))
 		{
 			Warn("Unknown key '" + key + "' in ems/" + SETTINGS_PATH + " - ignored.");
+			continue;
+		}
+
+		// Free-form strings (chord spec, chat command) are taken as-is.
+		if (key in FreeStringKeys)
+		{
+			Settings[key] = valStr;
+			applied++;
 			continue;
 		}
 
@@ -628,6 +685,8 @@ EBFInspectAmmo.GetState <- function (idx)
 			spoofRealClip = -1
 			spoofFakeClip = -1
 			spoofUntil = 0.0
+			comboStart = 0.0
+			comboFired = false
 		};
 	}
 	return State[idx];
@@ -635,6 +694,52 @@ EBFInspectAmmo.GetState <- function (idx)
 
 
 // Resolves the configured trigger key to its button bit.
+// Named button bits usable in a chord spec.
+EBFInspectAmmo.ChordBits <- {
+	duck = 4
+	use = 32
+	reload = 8192
+	jump = 2
+	speed = 131072
+	zoom = 524288
+	alt1 = 16384
+	alt2 = 32768
+	attack2 = 2048
+};
+
+// Parses "duck+speed" into a combined bit mask. Cached, since it is read
+// every frame. Returns 0 if the spec is empty or unrecognised.
+EBFInspectAmmo.ComboMaskCache <- -1;
+EBFInspectAmmo.ComboMaskSrc <- "";
+
+EBFInspectAmmo.ComboMask <- function ()
+{
+	if (ComboMaskSrc == Settings.combo && ComboMaskCache >= 0)
+		return ComboMaskCache;
+
+	local mask = 0;
+	local bad = "";
+
+	foreach (part in split(Settings.combo, "+ ,"))
+	{
+		local nm = strip(part).tolower();
+		if (nm.len() == 0)
+			continue;
+
+		if (nm in ChordBits)
+			mask = mask | ChordBits[nm];
+		else
+			bad += (bad.len() ? ", " : "") + nm;
+	}
+
+	if (bad.len())
+		Warn("Unknown key(s) in combo '" + Settings.combo + "': " + bad);
+
+	ComboMaskSrc = Settings.combo;
+	ComboMaskCache = mask;
+	return mask;
+}
+
 EBFInspectAmmo.TriggerBit <- function ()
 {
 	// Legacy compatibility: require_use 1 reproduces the old E+R binding.
@@ -875,25 +980,53 @@ EBFInspectAmmo.ManagerThink <- function ()
 		// GetButtonMask(), so once we suppress R we can no longer see the R
 		// press through the normal mask. m_nButtons carries the unfiltered
 		// input, so we read that when it is available.
-		local trigBit = TriggerBit();
-		local modBit  = ModifierBit();
-		local modHeld = (modBit == 0) || ((buttons & modBit) != 0);
-
 		local pressed = buttons & (~state.lastButtons);
 		state.lastButtons = buttons;
 
 		// The magazine is spoofed full only while the inspect animation is
-		// actually playing. It is armed on the keypress below and released by
+		// actually playing. It is armed on the trigger below and released by
 		// UpdateSpoof() once spoof_time elapses, so there is no dependency on
 		// how long any key stays held. This is what makes a quick tap behave
 		// exactly like a long press.
 		UpdateSpoof(player, state);
 
-		// Rising edge on the trigger key only, so holding it does not repeat.
-		if (!(pressed & trigBit))
-			continue;
+		local fire = false;
 
-		if (!modHeld)
+		if (Settings.trigger == "combo")
+		{
+			// Chord mode: every key in the chord must be held together for
+			// hold_time before it fires, and it fires only once per hold.
+			local mask = ComboMask();
+
+			if (mask != 0 && (buttons & mask) == mask)
+			{
+				if (state.comboStart == 0.0)
+					state.comboStart = now;
+
+				if (!state.comboFired && (now - state.comboStart) >= Settings.hold_time)
+				{
+					state.comboFired = true;
+					fire = true;
+				}
+			}
+			else
+			{
+				state.comboStart = 0.0;
+				state.comboFired = false;
+			}
+		}
+		else if (Settings.trigger == "key")
+		{
+			local trigBit = TriggerBit();
+			local modBit  = ModifierBit();
+			local modHeld = (modBit == 0) || ((buttons & modBit) != 0);
+
+			if ((pressed & trigBit) && modHeld)
+				fire = true;
+		}
+		// trigger == "chat" fires from OnGameEvent_player_say instead.
+
+		if (!fire)
 			continue;
 
 		if (now - state.lastInspect < Settings.cooldown)
@@ -908,6 +1041,58 @@ EBFInspectAmmo.ManagerThink <- function ()
 
 	return 0.0; // Next frame.
 }
+
+//-----------------------------------------------------------------------------
+// Chat command.
+//
+// Always available, whatever "trigger" is set to, because it cannot collide
+// with anything: it is typed, not bound. This is the guaranteed-working escape
+// hatch when every usable button bit is already taken by other script mods.
+//-----------------------------------------------------------------------------
+EBFInspectAmmo.HandleSay <- function (player, text)
+{
+	if (player == null || !player.IsValid())
+		return;
+
+	local msg = strip(text).tolower();
+	local cmd = strip(Settings.chat_command).tolower();
+
+	if (cmd.len() == 0 || msg != cmd)
+		return;
+
+	local state = GetState(player.GetEntityIndex());
+
+	// Chat deliberately ignores the cooldown: the player had to type it.
+	state.lastInspect = Time();
+	DoInspect(player, state, false);
+}
+
+// L4D2 fires player_say for every chat line.
+::OnGameEvent_player_say <- function (params)
+{
+	if (!("EBFInspectAmmo" in getroottable()))
+		return;
+
+	if (!EBFInspectAmmo.Settings.enable)
+		return;
+
+	try
+	{
+		if (!("text" in params) || !("userid" in params))
+			return;
+
+		local player = GetPlayerFromUserID(params.userid);
+		EBFInspectAmmo.HandleSay(player, params.text);
+	}
+	catch (e)
+	{
+		EBFInspectAmmo.Dbg("player_say handler error: " + e);
+	}
+}
+
+// Register the event callback without requiring Scripted Mode.
+if ("__CollectGameEventCallbacks" in getroottable())
+	__CollectGameEventCallbacks(getroottable());
 
 //-----------------------------------------------------------------------------
 // Manager lifecycle.
@@ -1018,17 +1203,30 @@ EBFInspectAmmo.Status <- function ()
 			+ ", showing " + hs.spoofFakeClip + ")");
 	else
 		Log("  clip spoof    : inactive (hold E to engage)");
-	local tb = TriggerBit();
-	local mb = ModifierBit();
-	Log("  trigger key   : " + Settings.key + " (bit " + tb + ")"
-		+ (Settings.require_use ? "  [require_use 1 -> legacy E+R]" : ""));
-	Log("  modifier      : " + (mb ? Settings.modifier : "none"));
 	local bm = host.GetButtonMask();
-	Log("  buttons now   : " + bm
-		+ ((bm & tb) ? "  [trigger DOWN]" : "  [trigger up]")
-		+ (mb ? ((bm & mb) ? "  [modifier DOWN]" : "  [modifier up]") : ""));
-	if (tb == IN_ALT1 && !Settings.require_use)
-		Log("  bind hint     : bind v \"+alt1\"   (then tap V)");
+	Log("  trigger mode  : " + Settings.trigger);
+
+	if (Settings.trigger == "combo")
+	{
+		local cm = ComboMask();
+		Log("  combo         : " + Settings.combo + " (mask " + cm + ")"
+			+ ", hold " + Settings.hold_time + "s");
+		Log("  combo now     : " + ((cm != 0 && (bm & cm) == cm)
+			? "ALL KEYS DOWN" : "not held"));
+		if (cm == 0)
+			Log("  WARNING       : combo parsed to 0 - check the key names!");
+	}
+	else if (Settings.trigger == "key")
+	{
+		local tb = TriggerBit();
+		local mb = ModifierBit();
+		Log("  key           : " + Settings.key + " (bit " + tb + ")"
+			+ ((bm & tb) ? "  [DOWN]" : "  [up]"));
+		Log("  modifier      : " + (mb ? Settings.modifier : "none"));
+	}
+
+	Log("  chat command  : " + Settings.chat_command + "  (always active)");
+	Log("  buttons now   : " + bm);
 
 	local wep = null;
 	try { wep = host.GetActiveWeapon(); } catch (e) { }

@@ -1,8 +1,8 @@
 # [TEST] Weapon Inspect Ammo Check
 
-Current version: `1.3.0`. **This is a test project.**
+Current version: `1.4.0`. **This is a test project.**
 
-A standalone Left 4 Dead 2 **VScript addon**. Bind a dedicated key, then tap it to "inspect" the weapon in your hands:
+A standalone Left 4 Dead 2 **VScript addon**. Hold **Ctrl + Shift** together (or type `!ammo` in chat) to "inspect" the weapon in your hands:
 
 - the weapon plays its own **reload / inspect animation**,
 - the **remaining ammo** is printed to chat and to the centre of the screen,
@@ -80,30 +80,37 @@ already uses it, merge the contents rather than overwriting.
 
 ## Use
 
-**First run needs one bind.** In the developer console (V can be any key):
+**Works out of the box. No binds required.**
+
+In game, **hold Ctrl + Shift together for about 0.45 s**.
+
+Or type in chat:
 
 ```text
-bind v "+alt1"
+!ammo
 ```
 
-Then just tap **V** in game. Add that line to `left4dead2\cfg\autoexec.cfg`
-to make it permanent.
+> **Why a chord instead of `+alt1`?**
+> "Spare" input bits like `+alt1` and `+alt2` are usually already taken on the
+> setups of heavy script/mod users. Ctrl and Shift are movement keys, so this
+> **consumes no bindable key at all** and cannot compete with your other script
+> mods. Pressing Ctrl alone (crouch) or Shift alone (walk) does nothing — both
+> must be held together past `hold_time`, so normal crouch-walking never
+> triggers it.
 
-> Why `+alt1`: it is built into Left 4 Dead 2 but **unbound by default**, so it
-> collides with nothing. A dedicated key also removes the E+R timing problem
-> entirely — no modifier to release early, and no fighting the reload key, so a
-> quick tap behaves exactly like a long press.
+Prefer something else? Any chord works:
 
-- Chat shows: `[Inspect] AK-47: 17/40  |  reserve 200`
-- The same line appears at screen centre.
-- The weapon plays its reload/inspect animation, and **no ammo is used**.
+```text
+combo duck+zoom          // Ctrl + aim
+combo speed+attack2      // Shift + right mouse
+```
 
-Because vanilla L4D2 has no inspect animations, stock weapons will show their
-**reload** animation. Custom weapon models that ship an inspect animation show
-that instead. This is a model limitation, not a script one — see
-[TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) §5.
+Or go back to a single key if you have one free:
 
----
+```text
+trigger key
+key alt1
+```
 
 ## Verify it is working
 
@@ -112,7 +119,7 @@ Open the developer console. On load you should see:
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.3.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.4.0 ready. Hold E and tap R to inspect.
 ```
 
 Diagnostic commands:
@@ -138,8 +145,12 @@ A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
 | Key | Range | Default | Meaning |
 |---|---|---|---|
 | `enable` | 0/1 | 1 | Master switch. |
-| `key` | alt1/alt2/zoom/reload | alt1 | Trigger key. alt1/alt2 are unbound in vanilla. |
-| `modifier` | none/use/duck/speed | none | Extra key to hold. use=E, duck=Ctrl, speed=Shift. |
+| `trigger` | combo/key/chat | combo | How to inspect. combo needs no bind at all. |
+| `combo` | see below | duck+speed | Chord. Names: duck(Ctrl), speed(Shift), zoom, use(E), reload(R), jump, attack2(RMB), alt1, alt2 — joined with `+`. |
+| `hold_time` | 0.0–3.0 | 0.45 | How long the chord must be held, preventing accidental triggers. |
+| `chat_command` | any text | !ammo | Chat trigger. **Always active**, never conflicts. |
+| `key` | alt1/alt2/zoom/reload | alt1 | Only used when trigger = key. |
+| `modifier` | none/use/duck/speed | none | Only used when trigger = key. |
 | `require_use` | 0/1 | 0 | Legacy: 1 restores E+R. Not recommended. |
 | `output_chat` | 0/1 | 1 | Print ammo to the chat area. |
 | `output_center` | 0/1 | 1 | Print ammo at screen centre. |
@@ -193,8 +204,8 @@ Delete the `.vpk` from `left4dead2\addons\`. Optionally remove
 | No `[InspectAmmo]` console lines | VPK not loaded. Check it is directly in `left4dead2\addons\` and enabled in the Add-ons list. |
 | `FAILED to include ebf_inspect_ammo.nut` | Packed from the wrong folder; `scripts/` must be at the VPK root. |
 | Ammo prints but nothing animates | The model has no inspect/reload sequence. Confirm with `Status()`. |
-| Nothing happens | Check you ran `bind v "+alt1"`. You may also be on someone else's server. Try `TestFire()`. |
-| It really reloads | Run `Status()` and confirm `trigger key` is alt1. Raise `spoof_time` if a long inspect animation is cut short. |
+| Chord does nothing | Try `!ammo` in chat first: if that works the script is fine and the chord is either taken or not held long enough. Run `Status()` and watch `combo now`. |
+| It really reloads | Run `Status()` and check `trigger mode`. Raise `spoof_time` if a long inspect animation is cut short. |
 
 More detail in [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) §8.
 
