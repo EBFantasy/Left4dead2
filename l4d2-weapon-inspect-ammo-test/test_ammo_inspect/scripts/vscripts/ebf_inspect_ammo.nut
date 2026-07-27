@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.0.0";
+EBFInspectAmmo.VERSION <- "1.1.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -60,8 +60,9 @@ EBFInspectAmmo.Settings <- {
 	output_chat = 1       // Print the ammo line to the chat area.
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
-	block_reload = 1      // Abort the real reload and restore ammo.
-	guard_ticks = 8       // Frames the ammo snapshot is enforced.
+	block_reload = 1      // Suppress the reload key while E is held.
+	guard_ticks = 8       // Backup ammo-snapshot window, in frames.
+	cancel_window = 3.0   // Seconds the fallback keeps cancelling a reload.
 	cooldown = 1.20       // Seconds between inspects, per player.
 	melee_ok = 1          // Allow inspecting melee / clipless items.
 	debug = 0             // Verbose console diagnostics.
@@ -75,13 +76,14 @@ EBFInspectAmmo.Bounds <- {
 	play_animation = [0, 1]
 	block_reload = [0, 1]
 	guard_ticks = [1, 40]
+	cancel_window = [0.5, 10.0]
 	cooldown = [0.0, 10.0]
 	melee_ok = [0, 1]
 	debug = [0, 1]
 }
 
 // Keys that stay floats; everything else is coerced to int.
-EBFInspectAmmo.FloatKeys <- { cooldown = 1 };
+EBFInspectAmmo.FloatKeys <- { cooldown = 1, cancel_window = 1 };
 
 // Pristine copy of the defaults, so a reload reverts any key that was removed
 // from the settings file instead of silently keeping the previous value.
@@ -179,10 +181,15 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"// play_animation  0 or 1. Drive the weapon's reload/inspect animation.\n" +
 		"//                 Custom weapon models that ship an inspect animation\n" +
 		"//                 will show it. Stock models show their reload. Default 1.\n" +
-		"// block_reload    0 or 1. Abort the real reload and restore clip and\n" +
-		"//                 reserve ammo from a snapshot. Default 1.\n" +
-		"// guard_ticks     1 to 40. Frames the snapshot is enforced. Default 8.\n" +
-		"//                 Raise it if a very slow custom reload still slips through.\n" +
+		"// block_reload    0 or 1. Suppress the reload key while E is held, so\n" +
+		"//                 E+R can never start a reload. Default 1.\n" +
+		"//                 Requires require_use 1 (the modifier key is what\n" +
+		"//                 tells the script when to suppress).\n" +
+		"// guard_ticks     1 to 40. Backup only: frames an ammo snapshot is\n" +
+		"//                 restored if a reload slips through. Default 8.\n" +
+		"// cancel_window   0.5 to 10.0. Seconds the fallback keeps cancelling\n" +
+		"//                 a reload, covering the whole reload animation.\n" +
+		"//                 Default 3.0. Raise for very slow custom reloads.\n" +
 		"// cooldown        0.0 to 10.0. Seconds between inspects. Default 1.20.\n" +
 		"// melee_ok        0 or 1. Allow inspecting melee and clipless items.\n" +
 		"//                 Default 1.\n" +
@@ -195,6 +202,7 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"play_animation 1\n" +
 		"block_reload 1\n" +
 		"guard_ticks 8\n" +
+		"cancel_window 3.0\n" +
 		"cooldown 1.20\n" +
 		"melee_ok 1\n" +
 		"debug 0\n";
@@ -516,7 +524,8 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 		state.guardClip = info.clip;
 		state.guardReserve = info.reserve;
 		state.guardAmmoType = info.ammoType;
-		state.guardTicks = Settings.guard_ticks;
+		state.guardTicks = 2000;                       // hard safety cap
+		state.guardUntil = Time() + Settings.cancel_window;
 	}
 
 	PlayInspectAnim(player, weapon, verbose);
@@ -546,18 +555,27 @@ EBFInspectAmmo.GetState <- function (idx)
 		State[idx] <- {
 			lastButtons = 0
 			lastInspect = 0.0
+			reloadBlocked = false
 			guardWeapon = null
 			guardClip = -1
 			guardReserve = -1
 			guardAmmoType = -1
 			guardTicks = 0
+			guardUntil = 0.0
 		};
 	}
 	return State[idx];
 }
 
-// Holds clip and reserve at their pre-press values, aborting any reload the
-// engine may have started from the same R press.
+// Secondary safety net.
+//
+// The primary defence is SetReloadBlocked() below, which stops the reload from
+// ever starting. This guard only catches the rare case where a reload slipped
+// through anyway (for example require_use 0, or another script forcing one on
+// the same frame). It restores clip and reserve for a few frames.
+//
+// It cannot be the primary mechanism: an L4D2 reload finishes over seconds of
+// animation, far beyond any short frame window.
 EBFInspectAmmo.RunGuard <- function (player, state)
 {
 	if (state.guardTicks <= 0)
@@ -566,7 +584,13 @@ EBFInspectAmmo.RunGuard <- function (player, state)
 	state.guardTicks--;
 
 	local gw = state.guardWeapon;
-	local last = (state.guardTicks <= 0);
+
+	// The guard must outlive the reload animation itself (seconds), not just
+	// a handful of frames, otherwise the magazine refills after we stop
+	// watching. guardUntil is a wall-clock deadline; guardTicks only caps how
+	// long we keep checking if the clock never advances.
+	local expired = (state.guardTicks <= 0) || (Time() >= state.guardUntil);
+	local last = expired;
 
 	if (gw != null && gw.IsValid())
 	{
@@ -578,6 +602,18 @@ EBFInspectAmmo.RunGuard <- function (player, state)
 			{
 				NetProps.SetPropInt(gw, "m_bInReload", 0);
 				Dbg("aborted a real reload on " + gw.GetClassname());
+			}
+
+			// Shotguns reload shell by shell and track their own state.
+			// Clearing m_bInReload alone would leave them mid-sequence.
+			foreach (prop in ["m_reloadState", "m_reloadAnimState",
+			                  "m_reloadNumShells", "m_shellsInserted"])
+			{
+				if (NetProps.HasProp(gw, prop)
+					&& NetProps.GetPropInt(gw, prop) != 0)
+				{
+					NetProps.SetPropInt(gw, prop, 0);
+				}
 			}
 
 			// Pin the magazine.
@@ -602,11 +638,132 @@ EBFInspectAmmo.RunGuard <- function (player, state)
 
 	if (last)
 	{
+		// Final pass: make sure the weapon is not left stuck mid-reload, or
+		// it would refuse to fire until the player reloads again.
+		if (gw != null && gw.IsValid())
+		{
+			try
+			{
+				if (NetProps.HasProp(gw, "m_bInReload"))
+					NetProps.SetPropInt(gw, "m_bInReload", 0);
+
+				// Let the weapon fire again immediately.
+				local now = Time();
+				foreach (prop in ["m_flNextPrimaryAttack", "m_flTimeWeaponIdle"])
+				{
+					if (NetProps.HasProp(gw, prop))
+						NetProps.SetPropFloat(gw, prop, now);
+				}
+				if (NetProps.HasProp(player, "m_flNextAttack"))
+					NetProps.SetPropFloat(player, "m_flNextAttack", now);
+			}
+			catch (e) { Dbg("guard finalise error: " + e); }
+		}
+
 		state.guardWeapon = null;
 		state.guardClip = -1;
 		state.guardReserve = -1;
 		state.guardAmmoType = -1;
+		state.guardUntil = 0.0;
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Reload-key suppression.
+//
+// This is the mechanism that actually stops E+R from reloading, and it works
+// by PREVENTION rather than by cleanup.
+//
+// m_afButtonDisabled is a per-player bit mask the engine consults while
+// building the usercmd. Any bit set there is stripped from the player's input
+// before CTerrorGun::Reload() ever sees it. So while E is held we set the
+// IN_RELOAD bit, and the reload simply never starts.
+//
+// This replaces the old snapshot-and-restore approach, which could not work:
+// an L4D2 reload completes over ~2-3 seconds of animation, long after a short
+// frame-based guard has expired. That is why a partially empty magazine still
+// got refilled.
+//
+// Bits are only ever OR'd in and AND'd out again, so other scripts that use
+// m_afButtonDisabled for their own bits are left untouched.
+//-----------------------------------------------------------------------------
+// Whether m_nButtons (unfiltered input) is readable. Detected once, on the
+// first player we look at. Determines which suppression strategy is used.
+EBFInspectAmmo.HaveRawButtons <- false;
+EBFInspectAmmo.RawButtonsProbed <- false;
+
+// Returns the player's UNFILTERED button mask.
+//
+// GetButtonMask() reflects m_afButtonDisabled, so once this script suppresses
+// IN_RELOAD the press would become invisible to us. m_nButtons holds the input
+// before that filtering, which is what edge detection must run on.
+EBFInspectAmmo.ReadRawButtons <- function (player, fallback)
+{
+	try
+	{
+		if (NetProps.HasProp(player, "m_nButtons"))
+		{
+			if (!RawButtonsProbed)
+			{
+				RawButtonsProbed = true;
+				HaveRawButtons = true;
+				Dbg("m_nButtons available - using preemptive reload suppression");
+			}
+			return NetProps.GetPropInt(player, "m_nButtons");
+		}
+	}
+	catch (e) { }
+
+	if (!RawButtonsProbed)
+	{
+		RawButtonsProbed = true;
+		HaveRawButtons = false;
+		Log("m_nButtons unavailable - falling back to reload cancellation. "
+			+ "E+R will still not consume ammo.");
+	}
+
+	return fallback;
+}
+
+EBFInspectAmmo.SetReloadBlocked <- function (player, state, blocked)
+{
+	if (state.reloadBlocked == blocked)
+		return;
+
+	try
+	{
+		if (!NetProps.HasProp(player, "m_afButtonDisabled"))
+		{
+			// Very unlikely, but never leave the player unable to reload.
+			Dbg("m_afButtonDisabled missing - cannot suppress the reload key");
+			state.reloadBlocked = false;
+			return;
+		}
+
+		local mask = NetProps.GetPropInt(player, "m_afButtonDisabled");
+
+		if (blocked)
+			mask = mask | IN_RELOAD;
+		else
+			mask = mask & (~IN_RELOAD);
+
+		NetProps.SetPropInt(player, "m_afButtonDisabled", mask);
+		state.reloadBlocked = blocked;
+
+		Dbg((blocked ? "blocked" : "released") + " reload key for " + player.GetPlayerName());
+	}
+	catch (e)
+	{
+		Dbg("SetReloadBlocked failed: " + e);
+	}
+}
+
+// Safety net: make sure a player never keeps a disabled reload key when the
+// script stops looking after them (death, disconnect, addon disabled...).
+EBFInspectAmmo.ForceUnblock <- function (player, state)
+{
+	if (state.reloadBlocked)
+		SetReloadBlocked(player, state, false);
 }
 
 //-----------------------------------------------------------------------------
@@ -615,7 +772,16 @@ EBFInspectAmmo.RunGuard <- function (player, state)
 EBFInspectAmmo.ManagerThink <- function ()
 {
 	if (!Settings.enable)
+	{
+		// Disabled at runtime: release anyone still holding a blocked key.
+		local p = null;
+		while (p = Entities.FindByClassname(p, "player"))
+		{
+			if (p.IsValid())
+				ForceUnblock(p, GetState(p.GetEntityIndex()));
+		}
 		return 1.0;
+	}
 
 	local now = Time();
 	local player = null;
@@ -642,6 +808,7 @@ EBFInspectAmmo.ManagerThink <- function ()
 
 		if (!usable)
 		{
+			ForceUnblock(player, state);
 			state.lastButtons = 0;
 			continue;
 		}
@@ -653,15 +820,36 @@ EBFInspectAmmo.ManagerThink <- function ()
 		}
 		catch (e) { continue; }
 
-		local pressed = buttons & (~state.lastButtons);
-		state.lastButtons = buttons;
+		// --- Reload-key suppression -------------------------------------
+		// While the modifier (E) is held, the reload key is disabled at the
+		// input layer so it can never start a reload. The moment E is
+		// released the key is handed straight back.
+		//
+		// Complication: m_afButtonDisabled strips the bit before it reaches
+		// GetButtonMask(), so once we suppress R we can no longer see the R
+		// press through the normal mask. m_nButtons carries the unfiltered
+		// input, so we read that when it is available.
+		local rawButtons = ReadRawButtons(player, buttons);
+		local useHeld = (rawButtons & IN_USE) ? true : false;
+
+		// Preemptive suppression is only safe when we can read raw input;
+		// otherwise blocking R would also hide the press we need to see.
+		// Without raw input we leave the key alone and rely on RunGuard,
+		// which cancels the reload for a full cancel_window instead.
+		if (Settings.block_reload && Settings.require_use && HaveRawButtons)
+			SetReloadBlocked(player, state, useHeld);
+
+		// Edge detection runs on the raw state, otherwise suppressing the
+		// key would also hide the press we are trying to detect.
+		local pressed = rawButtons & (~state.lastButtons);
+		state.lastButtons = rawButtons;
 
 		// Rising edge on R only, so holding R does not spam.
 		if (!(pressed & IN_RELOAD))
 			continue;
 
 		// E must be held, unless the user turned that requirement off.
-		if (Settings.require_use && !(buttons & IN_USE))
+		if (Settings.require_use && !(rawButtons & IN_USE))
 			continue;
 
 		if (now - state.lastInspect < Settings.cooldown)
@@ -720,8 +908,25 @@ EBFInspectAmmo.StartManager <- function ()
 	return true;
 }
 
+// Releases every reload key this script has disabled. Called before wiping
+// per-player state, so nobody is left unable to reload.
+EBFInspectAmmo.ReleaseAllKeys <- function ()
+{
+	local player = null;
+	while (player = Entities.FindByClassname(player, "player"))
+	{
+		if (!player.IsValid())
+			continue;
+
+		local idx = player.GetEntityIndex();
+		if (idx in State)
+			ForceUnblock(player, State[idx]);
+	}
+}
+
 EBFInspectAmmo.Reload <- function ()
 {
+	ReleaseAllKeys();
 	LoadSettings();
 	State.clear();
 	StartManager();
@@ -761,6 +966,24 @@ EBFInspectAmmo.Status <- function ()
 
 	Log("  name          : " + host.GetPlayerName());
 	Log("  survivor      : " + host.IsSurvivor());
+
+	// Reload-key suppression state, the thing to check when E+R still reloads.
+	local hs = GetState(host.GetEntityIndex());
+	Log("  reload key    : " + (hs.reloadBlocked ? "BLOCKED (E is held)" : "free"));
+	try
+	{
+		if (NetProps.HasProp(host, "m_afButtonDisabled"))
+		{
+			local mask = NetProps.GetPropInt(host, "m_afButtonDisabled");
+			Log("  m_afButtonDisabled = " + mask
+				+ ((mask & IN_RELOAD) ? "  (IN_RELOAD bit set)" : "  (IN_RELOAD bit clear)"));
+		}
+		else
+		{
+			Log("  m_afButtonDisabled : MISSING  <-- cannot suppress the reload key");
+		}
+	}
+	catch (e) { Log("  m_afButtonDisabled : read failed (" + e + ")"); }
 
 	local wep = null;
 	try { wep = host.GetActiveWeapon(); } catch (e) { }

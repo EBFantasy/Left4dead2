@@ -158,35 +158,74 @@ ammo output.
 
 ## 6. Making sure it is *not* a reload
 
-This is the requirement that needed the most care: E+R must not consume ammo.
+This is the requirement that needed the most care, and the first release got
+it wrong. Recording both the failure and the fix, because the reasoning
+matters.
 
-The engine may still begin a genuine reload from the same R press, since the
-script sees the button *after* the fact. Rather than trying to swallow the
-input (which would mean disabling the reload key via `m_afButtonDisabled` and
-risks leaving the player unable to reload if anything goes wrong), the script
-uses a **snapshot-and-restore guard**:
+### What failed in v1.0.0
 
-1. On inspect, record `m_iClip1`, the reserve `m_iAmmo[ammoType]`, and the
-   ammo type — *before* the engine processes the reload.
-2. For the next `guard_ticks` frames (default 8), every frame:
-   - clear `m_bInReload` if the engine set it → the reload is aborted,
-   - restore `m_iClip1` if it changed,
-   - restore `m_iAmmo[ammoType]` if it changed.
-3. Clear the snapshot.
+The original design was *reactive*: let the reload start, then snapshot
+`m_iClip1` / `m_iAmmo` and restore them for `guard_ticks` (8) frames.
 
-Both clip **and** reserve are pinned. Restoring only the clip would let a
-reload silently drain the reserve pool; restoring only the reserve would let
-the magazine refill for free. Guarding both means the player cannot gain or
-lose a single round.
+That cannot work. **An L4D2 reload is not instantaneous** — it completes at
+the end of a 2-3 second animation. Eight frames is roughly 0.12 s, so the
+guard had long expired by the time the engine actually refilled the magazine.
 
-The guard runs over several frames because a reload completes over time, and
-some custom weapon scripts have slow reloads. `guard_ticks` is configurable up
-to 40 for unusually slow weapons.
+The bug was invisible on a *full* magazine, because the engine never starts a
+reload there, which is exactly the case that got tested first. With a
+partially empty magazine, E+R reloaded normally.
 
-This design **fails safe**: if the guard somehow does not fire, the worst
-outcome is an ordinary reload — never a stuck weapon or a lost magazine.
+### What works now: suppress the key, do not undo the reload
 
----
+`m_afButtonDisabled` is a per-player bit mask the engine consults while
+building the usercmd. Any bit set in it is stripped from the player's input
+**before** `CTerrorGun::Reload()` is ever reached.
+
+So while the modifier (E) is held, the script sets the `IN_RELOAD` bit:
+
+```squirrel
+mask = NetProps.GetPropInt(player, "m_afButtonDisabled");
+NetProps.SetPropInt(player, "m_afButtonDisabled", mask | IN_RELOAD);
+```
+
+The reload never begins, so there is nothing to undo and nothing to race.
+Releasing E clears the bit immediately.
+
+The bit is only ever OR'd in and AND'd out, so other scripts using
+`m_afButtonDisabled` for their own bits are unaffected (verified by test).
+
+### The complication this creates
+
+Once `IN_RELOAD` is suppressed, `GetButtonMask()` no longer reports the R
+press — the script would blind itself to the very input it is looking for.
+
+`m_nButtons` holds the **unfiltered** input, so edge detection reads that
+instead. Availability is probed once and cached in `HaveRawButtons`.
+
+### Fallback when raw input is unavailable
+
+If `m_nButtons` cannot be read, preemptive suppression is *not* used, because
+blocking the key without being able to see it would permanently disable
+reloading. The script logs one line and falls back to cancellation:
+
+- clear `m_bInReload` every frame for `cancel_window` seconds (default 3.0,
+  covering the whole animation rather than a few frames),
+- restore clip and reserve,
+- reset the shotgun-specific state (`m_reloadState`, `m_reloadAnimState`,
+  `m_reloadNumShells`, `m_shellsInserted`), which shell-by-shell reloads need,
+- on the final pass clear `m_bInReload` and reset `m_flNextPrimaryAttack` /
+  `m_flTimeWeaponIdle` / `m_flNextAttack` so the weapon is not left stuck
+  mid-reload and unable to fire.
+
+Both paths are covered by tests. The design **fails safe**: the worst case is
+an ordinary reload, never a weapon that cannot fire or reload.
+
+### Safety: never strand the player
+
+A disabled reload key would be a serious bug if it leaked. The bit is force
+cleared when the player dies, is incapacitated, hangs from a ledge, stops
+being a survivor, when the addon is disabled at runtime, and on
+`Reload()` before per-player state is wiped.
 
 ## 7. Multiplayer scope (please read before reporting a bug)
 
@@ -219,7 +258,7 @@ If those lines are absent, the script never ran — the VPK is not being loaded.
 
 | Command | Purpose |
 |---|---|
-| `script EBFInspectAmmo.Status()` | Full dump: settings, current weapon, ammo, viewmodel path, and **which animation sequences that model actually has**. |
+| `script EBFInspectAmmo.Status()` | Full dump: settings, current weapon, ammo, viewmodel path, **which animation sequences that model actually has**, and the **reload-key suppression state** (`m_afButtonDisabled`). |
 | `script EBFInspectAmmo.TestFire()` | Runs one inspect on the host with verbose output. Proves the logic works without needing the key combo. |
 | `script EBFInspectAmmo.Reload()` | Re-reads the EMS settings file without a map change. |
 
@@ -238,7 +277,7 @@ aborted reloads, sequence choices).
 | `FAILED to include ebf_inspect_ammo.nut` | VPK packed from the wrong folder — `scripts/vscripts/` must be at the VPK root, not nested. |
 | Ammo prints, nothing animates | Model has no inspect/reload sequence. Confirm with `Status()`. Expected on stock models. |
 | Nothing happens on E+R | Another addon may bind those keys; or you are on someone else's server (§7). Try `TestFire()`. |
-| It actually reloads | Set `debug 1` and watch for `aborted a real reload`. Raise `guard_ticks`. |
+| It actually reloads | Run `Status()` and check `reload key`. While E is held it must say `BLOCKED`. If it says `m_nButtons unavailable` the fallback is in use; raise `cancel_window`. |
 | Want R alone | Set `require_use 0` — but this interferes with normal reloading. |
 
 ---
@@ -249,7 +288,8 @@ Generated on first run at `left4dead2/ems/ebf_inspect_ammo/settings.txt`
 (a reference copy is in `reference/ems/`). Format: `key value`, `//` comments.
 
 `enable`, `require_use`, `output_chat`, `output_center`, `play_animation`,
-`block_reload`, `guard_ticks`, `cooldown`, `melee_ok`, `debug`.
+`block_reload`, `guard_ticks`, `cancel_window`, `cooldown`, `melee_ok`,
+`debug`.
 
 Every value is **range-checked**. Out-of-range, non-numeric, and unknown keys
 are rejected with a specific console warning and the default is kept, so a

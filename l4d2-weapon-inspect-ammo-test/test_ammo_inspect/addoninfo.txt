@@ -3,7 +3,7 @@
 	addonSteamAppID		550
 
 	addontitle		"[TEST] Weapon Inspect Ammo Check"
-	addonversion		"1.0.0"
+	addonversion		"1.1.0"
 	addonauthor		"EpicBF"
 	addonauthorSteamID	""
 	addonURL0		"https://github.com/EBFantasy/Left4dead2"

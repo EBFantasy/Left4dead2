@@ -1,6 +1,6 @@
 # [TEST] Weapon Inspect Ammo Check
 
-Current version: `1.0.0`. **This is a test project.**
+Current version: `1.1.0`. **This is a test project.**
 
 A standalone Left 4 Dead 2 **VScript addon**. Hold **E** and tap **R** to
 "inspect" the weapon in your hands:
@@ -101,7 +101,7 @@ Open the developer console. On load you should see:
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.0.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.1.0 ready. Hold E and tap R to inspect.
 ```
 
 Diagnostic commands:
@@ -131,8 +131,9 @@ A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
 | `output_chat` | 0/1 | 1 | Print ammo to the chat area. |
 | `output_center` | 0/1 | 1 | Print ammo at screen centre. |
 | `play_animation` | 0/1 | 1 | Drive the reload/inspect animation. |
-| `block_reload` | 0/1 | 1 | Abort the real reload and restore ammo. |
-| `guard_ticks` | 1–40 | 8 | Frames the ammo snapshot is enforced. |
+| `block_reload` | 0/1 | 1 | Suppress the reload key while E is held, so E+R can never start a reload. |
+| `guard_ticks` | 1–40 | 8 | Backup only: frames an ammo snapshot is restored. |
+| `cancel_window` | 0.5–10.0 | 3.0 | Backup only: seconds a slipped-through reload keeps being cancelled. |
 | `cooldown` | 0.0–10.0 | 1.20 | Seconds between inspects. |
 | `melee_ok` | 0/1 | 1 | Allow inspecting melee / clipless items. |
 | `debug` | 0/1 | 0 | Verbose console diagnostics. |
@@ -181,7 +182,7 @@ Delete the `.vpk` from `left4dead2\addons\`. Optionally remove
 | `FAILED to include ebf_inspect_ammo.nut` | Packed from the wrong folder; `scripts/` must be at the VPK root. |
 | Ammo prints but nothing animates | The model has no inspect/reload sequence. Confirm with `Status()`. |
 | Nothing happens on E+R | You may be on someone else's server. Try `TestFire()`. |
-| It really reloads | Set `debug 1`, watch for `aborted a real reload`, and raise `guard_ticks`. |
+| It really reloads | Run `Status()`. While E is held, `reload key` must read `BLOCKED`. If it reports `m_nButtons unavailable`, the fallback path is active — raise `cancel_window`. |
 
 More detail in [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) §8.
 
