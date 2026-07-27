@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.2.0
+// [TEST] Weapon Inspect Ammo Check 1.3.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -7,9 +7,21 @@
 //     script EBFInspectAmmo.Reload()
 //
 // enable          0 or 1. Master switch. Default 1.
-// require_use     0 or 1. 1 = hold E while tapping R. Default 1.
-//                 0 makes R alone inspect, which fights with normal
-//                 reloading. Leave this at 1 unless you are testing.
+//
+// key             Which key inspects: alt1 | alt2 | zoom | reload.
+//                 Default alt1. alt1/alt2 are UNBOUND in vanilla L4D2,
+//                 so they clash with nothing. Bind one in the console:
+//                     bind v "+alt1"
+//                 Then just tap V to inspect. Put the bind line in
+//                 left4dead2/cfg/autoexec.cfg to make it permanent.
+// modifier        Extra key to hold: none | use | duck | speed.
+//                 Default none. Only needed if your chosen key is
+//                 already used for something else.
+//                 use = E, duck = Ctrl, speed = Shift.
+// require_use     Legacy switch. 1 restores the old E+R binding and
+//                 overrides key/modifier. Default 0. Not recommended:
+//                 R has to serve two purposes, so quick taps can still
+//                 slip a real reload through.
 // output_chat     0 or 1. Ammo line in the chat area. Default 1.
 // output_center   0 or 1. Ammo line at screen center. Default 1.
 // play_animation  0 or 1. Drive the weapon's reload/inspect animation.
@@ -20,24 +32,24 @@
 //                 The true ammo count is restored when E is released,
 //                 and is what the readout always shows.
 //                 Requires require_use 1.
-// guard_ticks     1 to 40. Backup only: frames an ammo snapshot is
-//                 restored if a reload slips through. Default 8.
-// cancel_window   0.5 to 10.0. Seconds the fallback keeps cancelling
-//                 a reload, covering the whole reload animation.
-//                 Default 3.0. Raise for very slow custom reloads.
+// spoof_time      0.5 to 10.0. Seconds the magazine is reported full
+//                 after each inspect, covering the animation so no
+//                 reload can start. Default 2.50. Raise it if a long
+//                 custom inspect animation gets cut short.
 // cooldown        0.0 to 10.0. Seconds between inspects. Default 1.20.
 // melee_ok        0 or 1. Allow inspecting melee and clipless items.
 //                 Default 1.
 // debug           0 or 1. Verbose console diagnostics. Default 0.
 // ============================================================
 enable 1
-require_use 1
+key alt1
+modifier none
+require_use 0
 output_chat 1
 output_center 1
 play_animation 1
 block_reload 1
-guard_ticks 8
-cancel_window 3.0
+spoof_time 2.50
 cooldown 1.20
 melee_ok 1
 debug 0

@@ -70,39 +70,50 @@ second execution it re-arms the think entity instead of building a second one.
 
 ## 4. Reading the input
 
-The polling loop is driven by one `info_target` with a think function attached
-via `AddThinkToEnt`, returning `0.0` so it runs every frame. This is the same
-pattern used by well-tested community scripts (e.g. samisalreadytaken's ping
-system).
+### Why a dedicated key, not E+R
 
-Buttons come from `CTerrorPlayer::GetButtonMask()`:
+The first three versions used **E + R**. It worked, but only if the player
+held E, tapped R, and kept holding E for a while afterwards. Real testing
+exposed three failure patterns:
 
-| Bit | Constant |
-|---:|---|
-| 32 | `IN_USE` (E) |
-| 8192 | `IN_RELOAD` (R) |
+| Player action | What happened |
+|---|---|
+| Tap E, then quickly press R | E already released, R arrives alone → real reload |
+| Press E+R, release both instantly | usually fine, but timing-dependent |
+| Release E while R is still held | spoof lifted with R still down → real reload |
 
-Edge detection matters. The mask reports keys **held**, so testing it raw would
-fire every frame R is down. The script stores `lastButtons` per player and acts
-only on the **rising edge**:
+The root problem is structural: **R has to serve two purposes.** Deciding
+"reload or inspect?" depends on the exact frame-by-frame overlap of two keys,
+which is fragile no matter how the logic is written.
+
+The fix was to stop overloading R. `IN_ALT1` (`+alt1`) exists in L4D2 but is
+**unbound by default**, so it conflicts with nothing:
+
+```text
+bind v "+alt1"
+```
+
+One key, one meaning. No modifier to release early, no reload key to fight
+over, and a single-frame tap behaves identically to a long press.
+
+`key` selects `alt1` / `alt2` / `zoom` / `reload`, and `modifier` can add
+`use` / `duck` / `speed` if the chosen key is already taken. Setting
+`require_use 1` restores the old E+R binding for anyone who wants it.
+
+### Edge detection
+
+Buttons come from `CTerrorPlayer::GetButtonMask()`. The mask reports keys
+**held**, so acting on it raw would fire every frame. The script stores
+`lastButtons` per player and acts only on the rising edge:
 
 ```squirrel
 local pressed = buttons & (~state.lastButtons);
 state.lastButtons = buttons;
-if (!(pressed & IN_RELOAD)) continue;      // R must have just gone down
-if (Settings.require_use && !(buttons & IN_USE)) continue;   // E must be held
+if (!(pressed & trigBit)) continue;      // trigger must have just gone down
+if (!modHeld) continue;                   // modifier, if any, must be held
 ```
 
-E is tested as *held* (level), R as *just pressed* (edge) — which is what
-"hold E, tap R" means physically. A per-player cooldown (default 1.2 s) stops
-animation spam.
-
-**Why not a bind or `UserConsoleCommand`?** A `bind` would need the user to
-edit their config, and `UserConsoleCommand` requires Scripted Mode, which is
-mutation-only and conflict-prone. Polling the button mask needs zero setup
-from the player.
-
----
+A per-player cooldown (default 1.2 s) stops animation spam.
 
 ## 5. Playing the animation (the interesting part)
 
@@ -216,6 +227,22 @@ Why this is sound:
 - **The readout shows the true count**, not the spoof: `ReadAmmo()` takes a
   `realClipOverride`, and `DoInspect()` passes the saved real value whenever a
   spoof is active. Without this the display would always read "40/40".
+
+### Attempt 4 (v1.3.0) — decouple the spoof from the key
+
+Even with the clip spoof, v1.2.0 tied the spoof's lifetime to "is E held?".
+Releasing the modifier mid-animation dropped the magazine back to its real
+value while the engine was still watching, so the inspect animation visibly
+turned into a reload animation partway through.
+
+The spoof is now driven by a **timer**, not by key state: `DoInspect()` sets
+`spoofUntil = Time() + spoof_time` (default 2.5 s) and `UpdateSpoof()` releases
+it when that deadline passes. Key state no longer matters once the inspect has
+started, which is why a single-frame tap and a long hold now behave identically.
+
+The old frame-counted `RunGuard` was deleted outright. It wrote the *real* clip
+back every frame while the spoof wanted the *full* value, so the two mechanisms
+were actively fighting each other.
 
 ### Not leaking a fake magazine
 

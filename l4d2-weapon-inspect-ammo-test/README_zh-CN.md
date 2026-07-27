@@ -1,9 +1,8 @@
 # [TEST] 武器检视弹药查看
 
-当前版本：`1.2.0`。**这是一个测试性质的项目。**
+当前版本：`1.3.0`。**这是一个测试性质的项目。**
 
-一个独立的《求生之路 2》**VScript 插件（VPK）**。按住 **E** 再点一下 **R**，即可
-“检视”手中的武器：
+一个独立的《求生之路 2》**VScript 插件（VPK）**。绑定一个专用键后轻点一下，即可“检视”手中的武器：
 
 - 武器播放它自己的**换弹 / 检视动作**；
 - **剩余弹药量**同时输出到聊天栏和屏幕正中；
@@ -78,7 +77,18 @@ addons 文件夹即可。
 
 ## 使用
 
-游戏中按住 **E**，然后点一下 **R**。
+**第一次使用需要绑定一个键。** 打开控制台执行（V 键可换成你喜欢的任意键）：
+
+```text
+bind v "+alt1"
+```
+
+之后在游戏中**轻点 V** 即可。想永久生效，把上面这行写进
+`left4dead2\cfg\autoexec.cfg`。
+
+> 为什么用 `+alt1`：它是《求生之路 2》内建但**默认完全没有绑定**的命令，不会和任何
+> 原版操作冲突。用专用单键也彻底解决了 E+R 的时序问题 —— 没有修饰键需要"按住"，
+> 也不用和换弹键抢同一个按键，轻点和长按效果完全一致。
 
 - 聊天栏显示：`[Inspect] AK-47: 17/40  |  reserve 200`
 - 屏幕正中显示同样的内容。
@@ -97,7 +107,7 @@ addons 文件夹即可。
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.2.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.3.0 ready. Hold E and tap R to inspect.
 ```
 
 诊断命令：
@@ -123,13 +133,14 @@ left4dead2\ems\ebf_inspect_ammo\settings.txt
 | 键名 | 有效范围 | 默认值 | 说明 |
 |---|---|---|---|
 | `enable` | 0/1 | 1 | 总开关。 |
-| `require_use` | 0/1 | 1 | 1 = 必须按住 E；0 = 只按 R（会干扰正常换弹）。 |
+| `key` | alt1/alt2/zoom/reload | alt1 | 触发键。alt1、alt2 在原版中未绑定，推荐。 |
+| `modifier` | none/use/duck/speed | none | 需额外按住的键。use=E，duck=Ctrl，speed=Shift。 |
+| `require_use` | 0/1 | 0 | 旧版兼容：设为 1 可恢复 E+R（不推荐，快速点按仍可能真换弹）。 |
 | `output_chat` | 0/1 | 1 | 在聊天栏输出弹药量。 |
 | `output_center` | 0/1 | 1 | 在屏幕正中输出弹药量。 |
 | `play_animation` | 0/1 | 1 | 播放换弹/检视动作。 |
 | `block_reload` | 0/1 | 1 | 按住 E 时把弹匣临时报告为满，使引擎拒绝换弹；松开 E 立即还原真实弹数。 |
-| `guard_ticks` | 1–40 | 8 | 仅作后备：还原弹药快照的帧数。 |
-| `cancel_window` | 0.5–10.0 | 3.0 | 仅作后备：持续取消漏网换弹的秒数。 |
+| `spoof_time` | 0.5–10.0 | 2.50 | 每次检视后，弹匣被报告为"满"的秒数，用于覆盖动画时长。 |
 | `cooldown` | 0.0–10.0 | 1.20 | 两次检视之间的冷却秒数。 |
 | `melee_ok` | 0/1 | 1 | 允许检视近战等无弹匣物品。 |
 | `debug` | 0/1 | 0 | 输出详细调试信息。 |
@@ -174,8 +185,8 @@ VScript 运行在**服务端**：
 | 控制台完全没有 `[InspectAmmo]` 字样 | VPK 没被加载。确认它直接放在 `left4dead2\addons\` 下，并在附加内容列表中已启用。 |
 | 出现 `FAILED to include ebf_inspect_ammo.nut` | 打包目录错了，`scripts/` 必须位于 VPK 根目录。 |
 | 弹药能显示但没有动作 | 该模型没有检视/换弹序列，用 `Status()` 确认。 |
-| 按 E+R 毫无反应 | 可能是在别人的服务器上（见上文）。可先用 `TestFire()` 验证。 |
-| 真的换弹了 | 按住 E 时执行 `Status()`，`clip spoof` 应显示 `ACTIVE`。若为 `inactive`，说明该武器无弹匣或本来就是满弹。 |
+| 按键毫无反应 | 先确认已执行 `bind v "+alt1"`。也可能是在别人的服务器上（见上文）。可用 `TestFire()` 验证。 |
+| 真的换弹了 | 执行 `Status()` 查看 `trigger key` 是否为 alt1。若检视动画很长被中途打断，调大 `spoof_time`。 |
 
 更详细的说明见 [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) 第 8 节。
 

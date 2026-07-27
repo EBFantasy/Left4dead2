@@ -3,12 +3,12 @@
 	addonSteamAppID		550
 
 	addontitle		"[TEST] Weapon Inspect Ammo Check"
-	addonversion		"1.2.0"
+	addonversion		"1.3.0"
 	addonauthor		"EpicBF"
 	addonauthorSteamID	""
 	addonURL0		"https://github.com/EBFantasy/Left4dead2"
 
-	addonDescription	"TEST BUILD. Hold E and tap R to inspect the weapon in your hands: it plays the weapon's own reload/inspect animation without actually reloading, and prints the remaining ammo to chat and screen center. No ammo is spent. Configure in left4dead2/ems/ebf_inspect_ammo/settings.txt. Diagnostics: script EBFInspectAmmo.Status()"
+	addonDescription	"TEST BUILD. Bind a key with:  bind v \"+alt1\"  then tap it to inspect the weapon in your hands: it plays the weapon's own reload/inspect animation without actually reloading, and prints the remaining ammo to chat and screen center. No ammo is spent. Configure in left4dead2/ems/ebf_inspect_ammo/settings.txt. Diagnostics: script EBFInspectAmmo.Status()"
 
 	addonContent_Script	1
 }

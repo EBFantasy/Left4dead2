@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.2.0";
+EBFInspectAmmo.VERSION <- "1.3.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -44,6 +44,25 @@ EBFInspectAmmo.State <- {};
 //-----------------------------------------------------------------------------
 EBFInspectAmmo.IN_USE <- 32;
 EBFInspectAmmo.IN_RELOAD <- 8192;
+
+// IN_ALT1 (+alt1) exists in L4D2 but is UNBOUND by default, so it collides
+// with nothing. This is the dedicated inspect key; bind it with:
+//     bind v "+alt1"
+// A dedicated key also removes the E+R timing problem entirely: there is no
+// modifier to release early and no reload key to fight over.
+EBFInspectAmmo.IN_ALT1 <- 16384;
+EBFInspectAmmo.IN_ALT2 <- 32768;
+EBFInspectAmmo.IN_ZOOM <- 524288;
+EBFInspectAmmo.IN_SPEED <- 65536;
+EBFInspectAmmo.IN_DUCK <- 4;
+
+// Selectable trigger keys, chosen by the "key" setting.
+EBFInspectAmmo.KeyBits <- {
+	alt1 = 16384
+	alt2 = 32768
+	zoom = 524288
+	reload = 8192
+};
 
 // ClientPrint destinations.
 EBFInspectAmmo.HUD_PRINTTALK <- 3;
@@ -56,13 +75,14 @@ EBFInspectAmmo.SETTINGS_PATH <- "ebf_inspect_ammo/settings.txt";
 //-----------------------------------------------------------------------------
 EBFInspectAmmo.Settings <- {
 	enable = 1            // Master switch.
-	require_use = 1       // 1 = E must be held while tapping R.
+	key = "alt1"          // Trigger key: alt1 | alt2 | zoom | reload.
+	modifier = "none"     // Extra key to hold: none | use | duck | speed.
+	require_use = 0       // Legacy: 1 forces modifier=use (E+R behaviour).
 	output_chat = 1       // Print the ammo line to the chat area.
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
 	block_reload = 1      // Report a full magazine while E is held.
-	guard_ticks = 8       // Backup ammo-snapshot window, in frames.
-	cancel_window = 3.0   // Seconds the fallback keeps cancelling a reload.
+	spoof_time = 2.50     // Seconds the magazine is held "full" per inspect.
 	cooldown = 1.20       // Seconds between inspects, per player.
 	melee_ok = 1          // Allow inspecting melee / clipless items.
 	debug = 0             // Verbose console diagnostics.
@@ -75,15 +95,20 @@ EBFInspectAmmo.Bounds <- {
 	output_center = [0, 1]
 	play_animation = [0, 1]
 	block_reload = [0, 1]
-	guard_ticks = [1, 40]
-	cancel_window = [0.5, 10.0]
+	spoof_time = [0.5, 10.0]
 	cooldown = [0.0, 10.0]
 	melee_ok = [0, 1]
 	debug = [0, 1]
 }
 
+// Settings whose value is a word, not a number.
+EBFInspectAmmo.StringKeys <- {
+	key = ["alt1", "alt2", "zoom", "reload"]
+	modifier = ["none", "use", "duck", "speed"]
+};
+
 // Keys that stay floats; everything else is coerced to int.
-EBFInspectAmmo.FloatKeys <- { cooldown = 1, cancel_window = 1 };
+EBFInspectAmmo.FloatKeys <- { cooldown = 1, spoof_time = 1 };
 
 // Pristine copy of the defaults, so a reload reverts any key that was removed
 // from the settings file instead of silently keeping the previous value.
@@ -173,9 +198,21 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//     script EBFInspectAmmo.Reload()\n" +
 		"//\n" +
 		"// enable          0 or 1. Master switch. Default 1.\n" +
-		"// require_use     0 or 1. 1 = hold E while tapping R. Default 1.\n" +
-		"//                 0 makes R alone inspect, which fights with normal\n" +
-		"//                 reloading. Leave this at 1 unless you are testing.\n" +
+		"//\n" +
+		"// key             Which key inspects: alt1 | alt2 | zoom | reload.\n" +
+		"//                 Default alt1. alt1/alt2 are UNBOUND in vanilla L4D2,\n" +
+		"//                 so they clash with nothing. Bind one in the console:\n" +
+		"//                     bind v \"+alt1\"\n" +
+		"//                 Then just tap V to inspect. Put the bind line in\n" +
+		"//                 left4dead2/cfg/autoexec.cfg to make it permanent.\n" +
+		"// modifier        Extra key to hold: none | use | duck | speed.\n" +
+		"//                 Default none. Only needed if your chosen key is\n" +
+		"//                 already used for something else.\n" +
+		"//                 use = E, duck = Ctrl, speed = Shift.\n" +
+		"// require_use     Legacy switch. 1 restores the old E+R binding and\n" +
+		"//                 overrides key/modifier. Default 0. Not recommended:\n" +
+		"//                 R has to serve two purposes, so quick taps can still\n" +
+		"//                 slip a real reload through.\n" +
 		"// output_chat     0 or 1. Ammo line in the chat area. Default 1.\n" +
 		"// output_center   0 or 1. Ammo line at screen center. Default 1.\n" +
 		"// play_animation  0 or 1. Drive the weapon's reload/inspect animation.\n" +
@@ -186,24 +223,26 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//                 The true ammo count is restored when E is released,\n" +
 		"//                 and is what the readout always shows.\n" +
 		"//                 Requires require_use 1.\n" +
-		"// guard_ticks     1 to 40. Backup only: frames an ammo snapshot is\n" +
-		"//                 restored if a reload slips through. Default 8.\n" +
-		"// cancel_window   0.5 to 10.0. Seconds the fallback keeps cancelling\n" +
-		"//                 a reload, covering the whole reload animation.\n" +
-		"//                 Default 3.0. Raise for very slow custom reloads.\n" +
+
+		"// spoof_time      0.5 to 10.0. Seconds the magazine is reported full\n" +
+		"//                 after each inspect, covering the animation so no\n" +
+		"//                 reload can start. Default 2.50. Raise it if a long\n" +
+		"//                 custom inspect animation gets cut short.\n" +
 		"// cooldown        0.0 to 10.0. Seconds between inspects. Default 1.20.\n" +
 		"// melee_ok        0 or 1. Allow inspecting melee and clipless items.\n" +
 		"//                 Default 1.\n" +
 		"// debug           0 or 1. Verbose console diagnostics. Default 0.\n" +
 		"// ============================================================\n" +
 		"enable 1\n" +
-		"require_use 1\n" +
+		"key alt1\n" +
+		"modifier none\n" +
+		"require_use 0\n" +
 		"output_chat 1\n" +
 		"output_center 1\n" +
 		"play_animation 1\n" +
 		"block_reload 1\n" +
-		"guard_ticks 8\n" +
-		"cancel_window 3.0\n" +
+
+		"spoof_time 2.50\n" +
 		"cooldown 1.20\n" +
 		"melee_ok 1\n" +
 		"debug 0\n";
@@ -262,6 +301,29 @@ EBFInspectAmmo.LoadSettings <- function ()
 		if (!(key in Settings))
 		{
 			Warn("Unknown key '" + key + "' in ems/" + SETTINGS_PATH + " - ignored.");
+			continue;
+		}
+
+		// Word-valued settings are validated against their allowed list.
+		if (key in StringKeys)
+		{
+			local lowered = valStr.tolower();
+			local ok = false;
+			foreach (allowed in StringKeys[key])
+				if (lowered == allowed) { ok = true; break; }
+
+			if (ok)
+			{
+				Settings[key] = lowered;
+				applied++;
+			}
+			else
+			{
+				local list = "";
+				foreach (a in StringKeys[key]) list += (list.len() ? ", " : "") + a;
+				Warn("Value '" + valStr + "' for '" + key
+					+ "' is not one of: " + list + " - ignored.");
+			}
 			continue;
 		}
 
@@ -526,16 +588,12 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 		return false;
 	}
 
-	// Snapshot clip AND reserve so an accidental real reload can be undone
-	// without the player gaining or losing a single round.
+	// Spoof the magazine full for the duration of the animation so the engine
+	// refuses to start a reload, then release it automatically.
 	if (Settings.block_reload && info.hasClip)
 	{
-		state.guardWeapon = weapon;
-		state.guardClip = info.clip;
-		state.guardReserve = info.reserve;
-		state.guardAmmoType = info.ammoType;
-		state.guardTicks = 2000;                       // hard safety cap
-		state.guardUntil = Time() + Settings.cancel_window;
+		SetClipSpoofed(player, state, true);
+		state.spoofUntil = Time() + Settings.spoof_time;
 	}
 
 	PlayInspectAnim(player, weapon, verbose);
@@ -569,137 +627,63 @@ EBFInspectAmmo.GetState <- function (idx)
 			spoofWeapon = null
 			spoofRealClip = -1
 			spoofFakeClip = -1
-			guardWeapon = null
-			guardClip = -1
-			guardReserve = -1
-			guardAmmoType = -1
-			guardTicks = 0
-			guardUntil = 0.0
+			spoofUntil = 0.0
 		};
 	}
 	return State[idx];
 }
 
-// Secondary safety net.
-//
-// The primary defence is SetClipSpoofed() below, which stops the reload from
-// ever starting. This guard only catches the rare case where a reload slipped
-// through anyway (for example require_use 0, or another script forcing one on
-// the same frame). It restores clip and reserve for a few frames.
-//
-// It cannot be the primary mechanism: an L4D2 reload finishes over seconds of
-// animation, far beyond any short frame window.
-EBFInspectAmmo.RunGuard <- function (player, state)
+
+// Resolves the configured trigger key to its button bit.
+EBFInspectAmmo.TriggerBit <- function ()
 {
-	if (state.guardTicks <= 0)
-		return;
+	// Legacy compatibility: require_use 1 reproduces the old E+R binding.
+	if (Settings.require_use && Settings.key == "alt1" && Settings.modifier == "none")
+		return IN_RELOAD;
 
-	state.guardTicks--;
+	if (Settings.key in KeyBits)
+		return KeyBits[Settings.key];
 
-	local gw = state.guardWeapon;
-
-	// The guard must outlive the reload animation itself (seconds), not just
-	// a handful of frames, otherwise the magazine refills after we stop
-	// watching. guardUntil is a wall-clock deadline; guardTicks only caps how
-	// long we keep checking if the clock never advances.
-	local expired = (state.guardTicks <= 0) || (Time() >= state.guardUntil);
-	local last = expired;
-
-	if (gw != null && gw.IsValid())
-	{
-		try
-		{
-			// Abort the reload in progress.
-			if (NetProps.HasProp(gw, "m_bInReload")
-				&& NetProps.GetPropInt(gw, "m_bInReload") != 0)
-			{
-				NetProps.SetPropInt(gw, "m_bInReload", 0);
-				Dbg("aborted a real reload on " + gw.GetClassname());
-			}
-
-			// Shotguns reload shell by shell and track their own state.
-			// Clearing m_bInReload alone would leave them mid-sequence.
-			foreach (prop in ["m_reloadState", "m_reloadAnimState",
-			                  "m_reloadNumShells", "m_shellsInserted"])
-			{
-				if (NetProps.HasProp(gw, prop)
-					&& NetProps.GetPropInt(gw, prop) != 0)
-				{
-					NetProps.SetPropInt(gw, prop, 0);
-				}
-			}
-
-			// Pin the magazine.
-			if (state.guardClip >= 0
-				&& NetProps.GetPropInt(gw, "m_iClip1") != state.guardClip)
-			{
-				NetProps.SetPropInt(gw, "m_iClip1", state.guardClip);
-			}
-
-			// Pin the reserve pool so nothing is consumed or duplicated.
-			if (state.guardReserve >= 0 && state.guardAmmoType >= 0)
-			{
-				if (NetProps.GetPropIntArray(player, "m_iAmmo", state.guardAmmoType) != state.guardReserve)
-					NetProps.SetPropIntArray(player, "m_iAmmo", state.guardReserve, state.guardAmmoType);
-			}
-		}
-		catch (e)
-		{
-			Dbg("guard error: " + e);
-		}
-	}
-
-	if (last)
-	{
-		// Final pass: make sure the weapon is not left stuck mid-reload, or
-		// it would refuse to fire until the player reloads again.
-		if (gw != null && gw.IsValid())
-		{
-			try
-			{
-				if (NetProps.HasProp(gw, "m_bInReload"))
-					NetProps.SetPropInt(gw, "m_bInReload", 0);
-
-				// Let the weapon fire again immediately.
-				local now = Time();
-				foreach (prop in ["m_flNextPrimaryAttack", "m_flTimeWeaponIdle"])
-				{
-					if (NetProps.HasProp(gw, prop))
-						NetProps.SetPropFloat(gw, prop, now);
-				}
-				if (NetProps.HasProp(player, "m_flNextAttack"))
-					NetProps.SetPropFloat(player, "m_flNextAttack", now);
-			}
-			catch (e) { Dbg("guard finalise error: " + e); }
-		}
-
-		state.guardWeapon = null;
-		state.guardClip = -1;
-		state.guardReserve = -1;
-		state.guardAmmoType = -1;
-		state.guardUntil = 0.0;
-	}
+	return IN_ALT1;
 }
 
-//-----------------------------------------------------------------------------
-// Reload-key suppression.
+// Resolves the configured modifier to its button bit, 0 when none.
+EBFInspectAmmo.ModifierBit <- function ()
+{
+	if (Settings.require_use && Settings.key == "alt1" && Settings.modifier == "none")
+		return IN_USE;
+
+	switch (Settings.modifier)
+	{
+		case "use":   return IN_USE;
+		case "duck":  return IN_DUCK;
+		case "speed": return IN_SPEED;
+	}
+	return 0;
+}
+
+// Releases a time-limited spoof once its deadline passes.
 //
-// This is the mechanism that actually stops E+R from reloading, and it works
-// by PREVENTION rather than by cleanup.
-//
-// m_afButtonDisabled is a per-player bit mask the engine consults while
-// building the usercmd. Any bit set there is stripped from the player's input
-// before CTerrorGun::Reload() ever sees it. So while E is held we set the
-// IN_RELOAD bit, and the reload simply never starts.
-//
-// This replaces the old snapshot-and-restore approach, which could not work:
-// an L4D2 reload completes over ~2-3 seconds of animation, long after a short
-// frame-based guard has expired. That is why a partially empty magazine still
-// got refilled.
-//
-// Bits are only ever OR'd in and AND'd out again, so other scripts that use
-// m_afButtonDisabled for their own bits are left untouched.
-//-----------------------------------------------------------------------------
+// The spoof lifetime is driven by a timer, NOT by how long a key is held.
+// That is the fix for the E+R timing complaints: tapping the key and holding
+// it now behave identically, and letting go early can no longer expose a
+// partially empty magazine to the engine mid-animation.
+EBFInspectAmmo.UpdateSpoof <- function (player, state)
+{
+	if (!state.spoofActive)
+		return;
+
+	if (state.spoofUntil > 0.0 && Time() >= state.spoofUntil)
+	{
+		SetClipSpoofed(player, state, false);
+		state.spoofUntil = 0.0;
+		return;
+	}
+
+	// Keep it pinned while it is meant to be active.
+	SetClipSpoofed(player, state, true);
+}
+
 // Reload prevention: the "already full" trick.
 //
 // WHY NOT m_afButtonDisabled:
@@ -857,8 +841,6 @@ EBFInspectAmmo.ManagerThink <- function ()
 
 		local state = GetState(player.GetEntityIndex());
 
-		RunGuard(player, state);
-
 		local usable = false;
 		try
 		{
@@ -893,28 +875,25 @@ EBFInspectAmmo.ManagerThink <- function ()
 		// GetButtonMask(), so once we suppress R we can no longer see the R
 		// press through the normal mask. m_nButtons carries the unfiltered
 		// input, so we read that when it is available.
-		local useHeld = (buttons & IN_USE) ? true : false;
-
-		// While E is held, report the magazine as full so the engine refuses
-		// to start a reload. Nothing is suppressed, so R remains visible to
-		// us and fully usable the moment E is released.
-		if (Settings.block_reload && Settings.require_use)
-		{
-			if (useHeld)
-				SetClipSpoofed(player, state, true);
-			else
-				ForceUnspoof(player, state);
-		}
+		local trigBit = TriggerBit();
+		local modBit  = ModifierBit();
+		local modHeld = (modBit == 0) || ((buttons & modBit) != 0);
 
 		local pressed = buttons & (~state.lastButtons);
 		state.lastButtons = buttons;
 
-		// Rising edge on R only, so holding R does not repeat.
-		if (!(pressed & IN_RELOAD))
+		// The magazine is spoofed full only while the inspect animation is
+		// actually playing. It is armed on the keypress below and released by
+		// UpdateSpoof() once spoof_time elapses, so there is no dependency on
+		// how long any key stays held. This is what makes a quick tap behave
+		// exactly like a long press.
+		UpdateSpoof(player, state);
+
+		// Rising edge on the trigger key only, so holding it does not repeat.
+		if (!(pressed & trigBit))
 			continue;
 
-		// E must be held, unless the user turned that requirement off.
-		if (Settings.require_use && !useHeld)
+		if (!modHeld)
 			continue;
 
 		if (now - state.lastInspect < Settings.cooldown)
@@ -1039,8 +1018,17 @@ EBFInspectAmmo.Status <- function ()
 			+ ", showing " + hs.spoofFakeClip + ")");
 	else
 		Log("  clip spoof    : inactive (hold E to engage)");
-	Log("  buttons       : " + host.GetButtonMask()
-		+ ((host.GetButtonMask() & IN_USE) ? "  [E held]" : "  [E not held]"));
+	local tb = TriggerBit();
+	local mb = ModifierBit();
+	Log("  trigger key   : " + Settings.key + " (bit " + tb + ")"
+		+ (Settings.require_use ? "  [require_use 1 -> legacy E+R]" : ""));
+	Log("  modifier      : " + (mb ? Settings.modifier : "none"));
+	local bm = host.GetButtonMask();
+	Log("  buttons now   : " + bm
+		+ ((bm & tb) ? "  [trigger DOWN]" : "  [trigger up]")
+		+ (mb ? ((bm & mb) ? "  [modifier DOWN]" : "  [modifier up]") : ""));
+	if (tb == IN_ALT1 && !Settings.require_use)
+		Log("  bind hint     : bind v \"+alt1\"   (then tap V)");
 
 	local wep = null;
 	try { wep = host.GetActiveWeapon(); } catch (e) { }
