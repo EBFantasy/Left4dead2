@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.1.0";
+EBFInspectAmmo.VERSION <- "1.2.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -60,7 +60,7 @@ EBFInspectAmmo.Settings <- {
 	output_chat = 1       // Print the ammo line to the chat area.
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
-	block_reload = 1      // Suppress the reload key while E is held.
+	block_reload = 1      // Report a full magazine while E is held.
 	guard_ticks = 8       // Backup ammo-snapshot window, in frames.
 	cancel_window = 3.0   // Seconds the fallback keeps cancelling a reload.
 	cooldown = 1.20       // Seconds between inspects, per player.
@@ -181,10 +181,11 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"// play_animation  0 or 1. Drive the weapon's reload/inspect animation.\n" +
 		"//                 Custom weapon models that ship an inspect animation\n" +
 		"//                 will show it. Stock models show their reload. Default 1.\n" +
-		"// block_reload    0 or 1. Suppress the reload key while E is held, so\n" +
-		"//                 E+R can never start a reload. Default 1.\n" +
-		"//                 Requires require_use 1 (the modifier key is what\n" +
-		"//                 tells the script when to suppress).\n" +
+		"// block_reload    0 or 1. While E is held, report the magazine as full\n" +
+		"//                 so the engine refuses to reload. Default 1.\n" +
+		"//                 The true ammo count is restored when E is released,\n" +
+		"//                 and is what the readout always shows.\n" +
+		"//                 Requires require_use 1.\n" +
 		"// guard_ticks     1 to 40. Backup only: frames an ammo snapshot is\n" +
 		"//                 restored if a reload slips through. Default 8.\n" +
 		"// cancel_window   0.5 to 10.0. Seconds the fallback keeps cancelling\n" +
@@ -320,7 +321,9 @@ EBFInspectAmmo.PrettyName <- function (classname)
 }
 
 // Never throws. Returns clip/reserve info for the given weapon.
-EBFInspectAmmo.ReadAmmo <- function (player, weapon)
+// realClipOverride: when the magazine is currently spoofed full, pass the true
+// value so the readout shows what the player actually has, not the fake.
+EBFInspectAmmo.ReadAmmo <- function (player, weapon, realClipOverride = null)
 {
 	local info = {
 		classname = "unknown"
@@ -347,7 +350,9 @@ EBFInspectAmmo.ReadAmmo <- function (player, weapon)
 			return info;
 
 		info.hasClip = true;
-		info.clip = NetProps.GetPropInt(weapon, "m_iClip1");
+		info.clip = (realClipOverride != null)
+			? realClipOverride
+			: NetProps.GetPropInt(weapon, "m_iClip1");
 	}
 	catch (e)
 	{
@@ -508,7 +513,12 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 		return false;
 	}
 
-	local info = ReadAmmo(player, weapon);
+	// If this weapon's clip is currently spoofed full, report the real count.
+	local realClip = null;
+	if (state.spoofActive && state.spoofWeapon == weapon)
+		realClip = state.spoofRealClip;
+
+	local info = ReadAmmo(player, weapon, realClip);
 
 	if (!info.hasClip && !Settings.melee_ok)
 	{
@@ -555,7 +565,10 @@ EBFInspectAmmo.GetState <- function (idx)
 		State[idx] <- {
 			lastButtons = 0
 			lastInspect = 0.0
-			reloadBlocked = false
+			spoofActive = false
+			spoofWeapon = null
+			spoofRealClip = -1
+			spoofFakeClip = -1
 			guardWeapon = null
 			guardClip = -1
 			guardReserve = -1
@@ -569,7 +582,7 @@ EBFInspectAmmo.GetState <- function (idx)
 
 // Secondary safety net.
 //
-// The primary defence is SetReloadBlocked() below, which stops the reload from
+// The primary defence is SetClipSpoofed() below, which stops the reload from
 // ever starting. This guard only catches the rare case where a reload slipped
 // through anyway (for example require_use 0, or another script forcing one on
 // the same frame). It restores clip and reserve for a few frames.
@@ -687,83 +700,134 @@ EBFInspectAmmo.RunGuard <- function (player, state)
 // Bits are only ever OR'd in and AND'd out again, so other scripts that use
 // m_afButtonDisabled for their own bits are left untouched.
 //-----------------------------------------------------------------------------
-// Whether m_nButtons (unfiltered input) is readable. Detected once, on the
-// first player we look at. Determines which suppression strategy is used.
-EBFInspectAmmo.HaveRawButtons <- false;
-EBFInspectAmmo.RawButtonsProbed <- false;
-
-// Returns the player's UNFILTERED button mask.
+// Reload prevention: the "already full" trick.
 //
-// GetButtonMask() reflects m_afButtonDisabled, so once this script suppresses
-// IN_RELOAD the press would become invisible to us. m_nButtons holds the input
-// before that filtering, which is what edge detection must run on.
-EBFInspectAmmo.ReadRawButtons <- function (player, fallback)
+// WHY NOT m_afButtonDisabled:
+// Setting the IN_RELOAD bit there does stop the reload, but the engine strips
+// that bit from the usercmd BEFORE anything else runs
+// (player_command.cpp: ucmd->buttons &= ~m_afButtonDisabled), and m_nButtons
+// is then assigned from that already-filtered mask
+// (baseplayer_shared.cpp: m_nButtons = nUserCmdButtonMask).
+// So on the server there is no way to both suppress R and still see R. v1.1.0
+// tried exactly that and blinded itself, which is why the readout vanished and
+// the weapon stuttered.
+//
+// WHAT WE DO INSTEAD:
+// While the modifier (E) is held we temporarily report the magazine as FULL by
+// writing m_iClip1 = GetMaxClip1(). CTerrorGun::Reload() bails out when the
+// clip is already full, so pressing R does nothing but play the weapon's
+// full-magazine idle/inspect animation -- exactly the behaviour we want.
+// The real clip value is restored the instant E is released.
+//
+// The reserve pool is never touched, and because the weapon never enters a
+// reload, no ammo can move. R stays fully functional the moment E is let go.
+EBFInspectAmmo.SetClipSpoofed <- function (player, state, spoof)
 {
-	try
+	// --- turn the spoof OFF -------------------------------------------
+	if (!spoof)
 	{
-		if (NetProps.HasProp(player, "m_nButtons"))
+		if (!state.spoofActive)
+			return;
+
+		local w = state.spoofWeapon;
+		if (w != null && w.IsValid())
 		{
-			if (!RawButtonsProbed)
+			try
 			{
-				RawButtonsProbed = true;
-				HaveRawButtons = true;
-				Dbg("m_nButtons available - using preemptive reload suppression");
+				// Only restore if nothing else changed the clip meanwhile
+				// (e.g. the player fired). Never hand out free ammo.
+				local now = NetProps.GetPropInt(w, "m_iClip1");
+				if (now == state.spoofFakeClip)
+					NetProps.SetPropInt(w, "m_iClip1", state.spoofRealClip);
+				else
+					Dbg("clip changed during spoof, leaving it at " + now);
 			}
-			return NetProps.GetPropInt(player, "m_nButtons");
+			catch (e) { Dbg("un-spoof failed: " + e); }
 		}
-	}
-	catch (e) { }
 
-	if (!RawButtonsProbed)
+		state.spoofActive = false;
+		state.spoofWeapon = null;
+		state.spoofRealClip = -1;
+		state.spoofFakeClip = -1;
+		Dbg("clip spoof OFF for " + player.GetPlayerName());
+		return;
+	}
+
+	// --- turn the spoof ON --------------------------------------------
+	if (state.spoofActive)
 	{
-		RawButtonsProbed = true;
-		HaveRawButtons = false;
-		Log("m_nButtons unavailable - falling back to reload cancellation. "
-			+ "E+R will still not consume ammo.");
+		// If the player switched weapons while holding E, restore the old one
+		// first so it is never left showing a fake magazine.
+		local cur = null;
+		try { cur = player.GetActiveWeapon(); } catch (e) { }
+		if (cur != state.spoofWeapon)
+		{
+			SetClipSpoofed(player, state, false);
+			// Fall through on the next frame with the new weapon.
+			return;
+		}
+
+		// Keep it pinned: the weapon may try to start a reload anyway.
+		local w = state.spoofWeapon;
+		if (w != null && w.IsValid())
+		{
+			try
+			{
+				if (NetProps.GetPropInt(w, "m_iClip1") < state.spoofFakeClip)
+					NetProps.SetPropInt(w, "m_iClip1", state.spoofFakeClip);
+			}
+			catch (e) { }
+		}
+		return;
 	}
 
-	return fallback;
-}
+	local w = null;
+	try { w = player.GetActiveWeapon(); } catch (e) { return; }
+	if (w == null || !w.IsValid())
+		return;
 
-EBFInspectAmmo.SetReloadBlocked <- function (player, state, blocked)
-{
-	if (state.reloadBlocked == blocked)
+	// Only guns with a magazine make sense here.
+	local cls = w.GetClassname();
+	if (cls in NoClipWeapons)
 		return;
 
 	try
 	{
-		if (!NetProps.HasProp(player, "m_afButtonDisabled"))
-		{
-			// Very unlikely, but never leave the player unable to reload.
-			Dbg("m_afButtonDisabled missing - cannot suppress the reload key");
-			state.reloadBlocked = false;
+		if (!NetProps.HasProp(w, "m_iClip1"))
 			return;
-		}
 
-		local mask = NetProps.GetPropInt(player, "m_afButtonDisabled");
+		local maxClip = -1;
+		if ("GetMaxClip1" in w)
+			maxClip = w.GetMaxClip1();
+		if (maxClip == null || maxClip <= 0)
+			return;
 
-		if (blocked)
-			mask = mask | IN_RELOAD;
-		else
-			mask = mask & (~IN_RELOAD);
+		local real = NetProps.GetPropInt(w, "m_iClip1");
+		if (real >= maxClip)
+			return;                       // already full, nothing to fake
 
-		NetProps.SetPropInt(player, "m_afButtonDisabled", mask);
-		state.reloadBlocked = blocked;
+		state.spoofWeapon = w;
+		state.spoofRealClip = real;
+		state.spoofFakeClip = maxClip;
+		state.spoofActive = true;
 
-		Dbg((blocked ? "blocked" : "released") + " reload key for " + player.GetPlayerName());
+		NetProps.SetPropInt(w, "m_iClip1", maxClip);
+		Dbg("clip spoof ON for " + player.GetPlayerName()
+			+ " (" + real + " -> " + maxClip + ")");
 	}
 	catch (e)
 	{
-		Dbg("SetReloadBlocked failed: " + e);
+		Dbg("spoof failed: " + e);
+		state.spoofActive = false;
+		state.spoofWeapon = null;
 	}
 }
 
-// Safety net: make sure a player never keeps a disabled reload key when the
-// script stops looking after them (death, disconnect, addon disabled...).
-EBFInspectAmmo.ForceUnblock <- function (player, state)
+// Always restore the true clip; used on death, weapon switch, shutdown, etc.
+EBFInspectAmmo.ForceUnspoof <- function (player, state)
 {
-	if (state.reloadBlocked)
-		SetReloadBlocked(player, state, false);
+	if (state.spoofActive)
+		SetClipSpoofed(player, state, false);
 }
 
 //-----------------------------------------------------------------------------
@@ -778,7 +842,7 @@ EBFInspectAmmo.ManagerThink <- function ()
 		while (p = Entities.FindByClassname(p, "player"))
 		{
 			if (p.IsValid())
-				ForceUnblock(p, GetState(p.GetEntityIndex()));
+				ForceUnspoof(p, GetState(p.GetEntityIndex()));
 		}
 		return 1.0;
 	}
@@ -808,7 +872,7 @@ EBFInspectAmmo.ManagerThink <- function ()
 
 		if (!usable)
 		{
-			ForceUnblock(player, state);
+			ForceUnspoof(player, state);
 			state.lastButtons = 0;
 			continue;
 		}
@@ -829,27 +893,28 @@ EBFInspectAmmo.ManagerThink <- function ()
 		// GetButtonMask(), so once we suppress R we can no longer see the R
 		// press through the normal mask. m_nButtons carries the unfiltered
 		// input, so we read that when it is available.
-		local rawButtons = ReadRawButtons(player, buttons);
-		local useHeld = (rawButtons & IN_USE) ? true : false;
+		local useHeld = (buttons & IN_USE) ? true : false;
 
-		// Preemptive suppression is only safe when we can read raw input;
-		// otherwise blocking R would also hide the press we need to see.
-		// Without raw input we leave the key alone and rely on RunGuard,
-		// which cancels the reload for a full cancel_window instead.
-		if (Settings.block_reload && Settings.require_use && HaveRawButtons)
-			SetReloadBlocked(player, state, useHeld);
+		// While E is held, report the magazine as full so the engine refuses
+		// to start a reload. Nothing is suppressed, so R remains visible to
+		// us and fully usable the moment E is released.
+		if (Settings.block_reload && Settings.require_use)
+		{
+			if (useHeld)
+				SetClipSpoofed(player, state, true);
+			else
+				ForceUnspoof(player, state);
+		}
 
-		// Edge detection runs on the raw state, otherwise suppressing the
-		// key would also hide the press we are trying to detect.
-		local pressed = rawButtons & (~state.lastButtons);
-		state.lastButtons = rawButtons;
+		local pressed = buttons & (~state.lastButtons);
+		state.lastButtons = buttons;
 
-		// Rising edge on R only, so holding R does not spam.
+		// Rising edge on R only, so holding R does not repeat.
 		if (!(pressed & IN_RELOAD))
 			continue;
 
 		// E must be held, unless the user turned that requirement off.
-		if (Settings.require_use && !(rawButtons & IN_USE))
+		if (Settings.require_use && !useHeld)
 			continue;
 
 		if (now - state.lastInspect < Settings.cooldown)
@@ -908,8 +973,8 @@ EBFInspectAmmo.StartManager <- function ()
 	return true;
 }
 
-// Releases every reload key this script has disabled. Called before wiping
-// per-player state, so nobody is left unable to reload.
+// Restores every spoofed magazine. Called before wiping per-player state so
+// no weapon is left showing a fake ammo count.
 EBFInspectAmmo.ReleaseAllKeys <- function ()
 {
 	local player = null;
@@ -920,7 +985,7 @@ EBFInspectAmmo.ReleaseAllKeys <- function ()
 
 		local idx = player.GetEntityIndex();
 		if (idx in State)
-			ForceUnblock(player, State[idx]);
+			ForceUnspoof(player, State[idx]);
 	}
 }
 
@@ -967,23 +1032,15 @@ EBFInspectAmmo.Status <- function ()
 	Log("  name          : " + host.GetPlayerName());
 	Log("  survivor      : " + host.IsSurvivor());
 
-	// Reload-key suppression state, the thing to check when E+R still reloads.
+	// Clip-spoof state: this is what stops E+R from reloading.
 	local hs = GetState(host.GetEntityIndex());
-	Log("  reload key    : " + (hs.reloadBlocked ? "BLOCKED (E is held)" : "free"));
-	try
-	{
-		if (NetProps.HasProp(host, "m_afButtonDisabled"))
-		{
-			local mask = NetProps.GetPropInt(host, "m_afButtonDisabled");
-			Log("  m_afButtonDisabled = " + mask
-				+ ((mask & IN_RELOAD) ? "  (IN_RELOAD bit set)" : "  (IN_RELOAD bit clear)"));
-		}
-		else
-		{
-			Log("  m_afButtonDisabled : MISSING  <-- cannot suppress the reload key");
-		}
-	}
-	catch (e) { Log("  m_afButtonDisabled : read failed (" + e + ")"); }
+	if (hs.spoofActive)
+		Log("  clip spoof    : ACTIVE (real " + hs.spoofRealClip
+			+ ", showing " + hs.spoofFakeClip + ")");
+	else
+		Log("  clip spoof    : inactive (hold E to engage)");
+	Log("  buttons       : " + host.GetButtonMask()
+		+ ((host.GetButtonMask() & IN_USE) ? "  [E held]" : "  [E not held]"));
 
 	local wep = null;
 	try { wep = host.GetActiveWeapon(); } catch (e) { }

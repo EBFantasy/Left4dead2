@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.1.0
+// [TEST] Weapon Inspect Ammo Check 1.2.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -15,10 +15,11 @@
 // play_animation  0 or 1. Drive the weapon's reload/inspect animation.
 //                 Custom weapon models that ship an inspect animation
 //                 will show it. Stock models show their reload. Default 1.
-// block_reload    0 or 1. Suppress the reload key while E is held, so
-//                 E+R can never start a reload. Default 1.
-//                 Requires require_use 1 (the modifier key is what
-//                 tells the script when to suppress).
+// block_reload    0 or 1. While E is held, report the magazine as full
+//                 so the engine refuses to reload. Default 1.
+//                 The true ammo count is restored when E is released,
+//                 and is what the readout always shows.
+//                 Requires require_use 1.
 // guard_ticks     1 to 40. Backup only: frames an ammo snapshot is
 //                 restored if a reload slips through. Default 8.
 // cancel_window   0.5 to 10.0. Seconds the fallback keeps cancelling

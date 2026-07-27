@@ -158,74 +158,77 @@ ammo output.
 
 ## 6. Making sure it is *not* a reload
 
-This is the requirement that needed the most care, and the first release got
-it wrong. Recording both the failure and the fix, because the reasoning
-matters.
+This took three attempts. Recording all of them, because the two failures are
+instructive and the reasoning is the whole point of the feature.
 
-### What failed in v1.0.0
+### Attempt 1 (v1.0.0) — restore the ammo afterwards. FAILED.
 
-The original design was *reactive*: let the reload start, then snapshot
-`m_iClip1` / `m_iAmmo` and restore them for `guard_ticks` (8) frames.
+Snapshot `m_iClip1` / `m_iAmmo`, then restore for `guard_ticks` (8) frames.
 
-That cannot work. **An L4D2 reload is not instantaneous** — it completes at
-the end of a 2-3 second animation. Eight frames is roughly 0.12 s, so the
-guard had long expired by the time the engine actually refilled the magazine.
+An L4D2 reload completes at the **end** of a 2-3 second animation. Eight
+frames is ~0.12 s, so the guard had long expired before the engine refilled
+the magazine. It only appeared to work on a **full** magazine, where the
+engine never starts a reload at all — which is exactly what got tested first.
 
-The bug was invisible on a *full* magazine, because the engine never starts a
-reload there, which is exactly the case that got tested first. With a
-partially empty magazine, E+R reloaded normally.
+### Attempt 2 (v1.1.0) — suppress the key. FAILED WORSE.
 
-### What works now: suppress the key, do not undo the reload
+Set the `IN_RELOAD` bit in `m_afButtonDisabled` while E is held.
 
-`m_afButtonDisabled` is a per-player bit mask the engine consults while
-building the usercmd. Any bit set in it is stripped from the player's input
-**before** `CTerrorGun::Reload()` is ever reached.
+The suppression itself worked, but it is **self-defeating on the server**:
 
-So while the modifier (E) is held, the script sets the `IN_RELOAD` bit:
+```cpp
+// player_command.cpp
+ucmd->buttons |= player->m_afButtonForced;
+ucmd->buttons &= ~player->m_afButtonDisabled;   // R is stripped HERE
 
-```squirrel
-mask = NetProps.GetPropInt(player, "m_afButtonDisabled");
-NetProps.SetPropInt(player, "m_afButtonDisabled", mask | IN_RELOAD);
+// baseplayer_shared.cpp
+m_nButtons = nUserCmdButtonMask;                // ...before this assignment
 ```
 
-The reload never begins, so there is nothing to undo and nothing to race.
-Releasing E clears the bit immediately.
+`m_nButtons` is assigned from the **already-filtered** mask, so it is not the
+"raw input" I assumed. Once R is suppressed there is no server-side way to
+still observe it. The script blinded itself, which produced exactly the two
+reported symptoms: **no ammo readout at all**, and the weapon **stuttering**
+while R was held, only reloading after release.
 
-The bit is only ever OR'd in and AND'd out, so other scripts using
-`m_afButtonDisabled` for their own bits are unaffected (verified by test).
+Lesson: suppressing an input and detecting that same input are mutually
+exclusive here.
 
-### The complication this creates
+### Attempt 3 (v1.2.0) — pretend the magazine is full. WORKS.
 
-Once `IN_RELOAD` is suppressed, `GetButtonMask()` no longer reports the R
-press — the script would blind itself to the very input it is looking for.
+Do not touch the input at all. Instead, while E is held, temporarily write:
 
-`m_nButtons` holds the **unfiltered** input, so edge detection reads that
-instead. Availability is probed once and cached in `HaveRawButtons`.
+```squirrel
+NetProps.SetPropInt(weapon, "m_iClip1", weapon.GetMaxClip1());
+```
 
-### Fallback when raw input is unavailable
+`CTerrorGun::Reload()` bails out immediately when the clip is already full, so
+pressing R does nothing except play the weapon's full-magazine idle/inspect
+animation — precisely the animation this feature exists to trigger. The real
+clip value is restored the moment E is released.
 
-If `m_nButtons` cannot be read, preemptive suppression is *not* used, because
-blocking the key without being able to see it would permanently disable
-reloading. The script logs one line and falls back to cancellation:
+Why this is sound:
 
-- clear `m_bInReload` every frame for `cancel_window` seconds (default 3.0,
-  covering the whole animation rather than a few frames),
-- restore clip and reserve,
-- reset the shotgun-specific state (`m_reloadState`, `m_reloadAnimState`,
-  `m_reloadNumShells`, `m_shellsInserted`), which shell-by-shell reloads need,
-- on the final pass clear `m_bInReload` and reset `m_flNextPrimaryAttack` /
-  `m_flTimeWeaponIdle` / `m_flNextAttack` so the weapon is not left stuck
-  mid-reload and unable to fire.
+- **R is never suppressed**, so edge detection keeps working normally and the
+  key stays fully usable the instant E is let go.
+- **The reserve pool is never touched.** The weapon never enters a reload, so
+  no ammo can move in either direction.
+- **The readout shows the true count**, not the spoof: `ReadAmmo()` takes a
+  `realClipOverride`, and `DoInspect()` passes the saved real value whenever a
+  spoof is active. Without this the display would always read "40/40".
 
-Both paths are covered by tests. The design **fails safe**: the worst case is
-an ordinary reload, never a weapon that cannot fire or reload.
+### Not leaking a fake magazine
 
-### Safety: never strand the player
+A spoofed clip must never outlive the keypress, or the player would appear to
+gain ammo. The true value is restored when E is released, on death,
+incapacitation, ledge hang, loss of survivor status, on weapon switch while E
+is still held, when the addon is disabled at runtime, and in `Reload()`.
 
-A disabled reload key would be a serious bug if it leaked. The bit is force
-cleared when the player dies, is incapacitated, hangs from a ledge, stops
-being a survivor, when the addon is disabled at runtime, and on
-`Reload()` before per-player state is wiped.
+One deliberate refusal: if the clip value **changed** while spoofed (the
+player fired), the script does **not** force the old number back, because that
+would hand out free rounds. It logs and leaves the current value alone.
+
+Weapons with no magazine (melee, throwables, medkits) are never spoofed.
 
 ## 7. Multiplayer scope (please read before reporting a bug)
 
@@ -258,7 +261,7 @@ If those lines are absent, the script never ran — the VPK is not being loaded.
 
 | Command | Purpose |
 |---|---|
-| `script EBFInspectAmmo.Status()` | Full dump: settings, current weapon, ammo, viewmodel path, **which animation sequences that model actually has**, and the **reload-key suppression state** (`m_afButtonDisabled`). |
+| `script EBFInspectAmmo.Status()` | Full dump: settings, current weapon, ammo, viewmodel path, **which animation sequences that model actually has**, and the **clip-spoof state**. |
 | `script EBFInspectAmmo.TestFire()` | Runs one inspect on the host with verbose output. Proves the logic works without needing the key combo. |
 | `script EBFInspectAmmo.Reload()` | Re-reads the EMS settings file without a map change. |
 
@@ -277,7 +280,7 @@ aborted reloads, sequence choices).
 | `FAILED to include ebf_inspect_ammo.nut` | VPK packed from the wrong folder — `scripts/vscripts/` must be at the VPK root, not nested. |
 | Ammo prints, nothing animates | Model has no inspect/reload sequence. Confirm with `Status()`. Expected on stock models. |
 | Nothing happens on E+R | Another addon may bind those keys; or you are on someone else's server (§7). Try `TestFire()`. |
-| It actually reloads | Run `Status()` and check `reload key`. While E is held it must say `BLOCKED`. If it says `m_nButtons unavailable` the fallback is in use; raise `cancel_window`. |
+| It actually reloads | Run `Status()` while holding E: `clip spoof` must read `ACTIVE`. If it stays `inactive`, the weapon has no magazine or was already full. |
 | Want R alone | Set `require_use 0` — but this interferes with normal reloading. |
 
 ---

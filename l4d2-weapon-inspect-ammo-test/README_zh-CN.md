@@ -1,6 +1,6 @@
 # [TEST] 武器检视弹药查看
 
-当前版本：`1.1.0`。**这是一个测试性质的项目。**
+当前版本：`1.2.0`。**这是一个测试性质的项目。**
 
 一个独立的《求生之路 2》**VScript 插件（VPK）**。按住 **E** 再点一下 **R**，即可
 “检视”手中的武器：
@@ -97,7 +97,7 @@ addons 文件夹即可。
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.1.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.2.0 ready. Hold E and tap R to inspect.
 ```
 
 诊断命令：
@@ -127,7 +127,7 @@ left4dead2\ems\ebf_inspect_ammo\settings.txt
 | `output_chat` | 0/1 | 1 | 在聊天栏输出弹药量。 |
 | `output_center` | 0/1 | 1 | 在屏幕正中输出弹药量。 |
 | `play_animation` | 0/1 | 1 | 播放换弹/检视动作。 |
-| `block_reload` | 0/1 | 1 | 按住 E 时屏蔽换弹键，从源头阻止 E+R 触发换弹。 |
+| `block_reload` | 0/1 | 1 | 按住 E 时把弹匣临时报告为满，使引擎拒绝换弹；松开 E 立即还原真实弹数。 |
 | `guard_ticks` | 1–40 | 8 | 仅作后备：还原弹药快照的帧数。 |
 | `cancel_window` | 0.5–10.0 | 3.0 | 仅作后备：持续取消漏网换弹的秒数。 |
 | `cooldown` | 0.0–10.0 | 1.20 | 两次检视之间的冷却秒数。 |
@@ -175,7 +175,7 @@ VScript 运行在**服务端**：
 | 出现 `FAILED to include ebf_inspect_ammo.nut` | 打包目录错了，`scripts/` 必须位于 VPK 根目录。 |
 | 弹药能显示但没有动作 | 该模型没有检视/换弹序列，用 `Status()` 确认。 |
 | 按 E+R 毫无反应 | 可能是在别人的服务器上（见上文）。可先用 `TestFire()` 验证。 |
-| 真的换弹了 | 执行 `Status()`，按住 E 时 `reload key` 应显示 `BLOCKED`。若提示 `m_nButtons unavailable` 说明走了后备路径，请调大 `cancel_window`。 |
+| 真的换弹了 | 按住 E 时执行 `Status()`，`clip spoof` 应显示 `ACTIVE`。若为 `inactive`，说明该武器无弹匣或本来就是满弹。 |
 
 更详细的说明见 [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) 第 8 节。
 
