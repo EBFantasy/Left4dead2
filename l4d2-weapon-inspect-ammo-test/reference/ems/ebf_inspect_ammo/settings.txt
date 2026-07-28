@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.5.0
+// [TEST] Weapon Inspect Ammo Check 1.6.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -18,7 +18,8 @@
 // combo           Chord for trigger=combo. Default speed+use,
 //                 i.e. hold Shift and press E.
 //                 Valid names, join with +:
-//                   duck (Ctrl)  speed (Shift)  zoom  use (E)
+//                   duck (Ctrl)   speed (Shift, walks slowly)
+//                   use (E)       zoom          jump (Space)
 //                   reload (R)   jump (Space)   attack2 (RMB)
 //                   alt1  alt2
 //                 Examples:  speed+use   duck+zoom   speed+attack2
@@ -37,19 +38,24 @@
 // modifier        Extra key to hold: none | use | duck | speed.
 //                 Default none. Only needed if your chosen key is
 //                 already used for something else.
-//                 use = E, duck = Ctrl, speed = Shift.
+//                 use = E, duck = Ctrl, speed = Shift (walk).
 // require_use     Legacy switch. 1 restores the old E+R binding and
 //                 overrides key/modifier. Default 0. Not recommended:
 //                 R has to serve two purposes, so quick taps can still
 //                 slip a real reload through.
 // output_chat     0 or 1. Ammo line in the chat area. Default 1.
 // output_center   0 or 1. Ammo line at screen center. Default 1.
-// anim_source     auto | deploy | idle | reload. Default auto.
-//                 Which animation to play when the model has no
-//                 dedicated inspect sequence. Most inspect weapon
-//                 mods put their animation on the DEPLOY/draw anim,
-//                 which auto tries first. Use 'reload' to force the
-//                 old behaviour, or 'idle' for mods that use idle.
+// anim_source     auto | pickup | deploy | idle | reload.
+//                 Default auto. Which animation the inspect plays.
+//                 auto   - a real inspect/fidget anim if the model
+//                          has one, otherwise the ITEM PICKUP anim.
+//                 pickup - force the item-pickup animation. This is
+//                          the one you see when staring at a
+//                          pickupable item, and is where most weapon
+//                          mods put their inspect animation.
+//                 deploy - the draw/pull-out animation (different!).
+//                 idle   - plain idle.
+//                 reload - force the reload animation.
 // play_animation  0 or 1. Drive the weapon's reload/inspect animation.
 //                 Custom weapon models that ship an inspect animation
 //                 will show it. Stock models show their reload. Default 1.

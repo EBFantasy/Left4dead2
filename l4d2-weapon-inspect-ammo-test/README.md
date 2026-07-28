@@ -1,6 +1,6 @@
 # [TEST] Weapon Inspect Ammo Check
 
-Current version: `1.5.0`. **This is a test project.**
+Current version: `1.6.0`. **This is a test project.**
 
 A standalone Left 4 Dead 2 **VScript addon**. Hold **Shift** and press **E** (or type `!ammo` in chat) to "inspect" the weapon in your hands:
 
@@ -94,7 +94,7 @@ Or type in chat:
 > "Spare" input bits like `+alt1`/`+alt2` are usually already bound on heavy
 > script users' setups. Shift and E are existing actions, so this **consumes no
 > bindable key at all**, sits comfortably under the left hand, and looks natural
-> on screen (no crouching first). Shift alone (sprint) or E alone (use) does
+> on screen (no crouching first). Shift alone (walk) or E alone (use) does
 > nothing — Shift must be held while E is pressed, past `hold_time`.
 
 Prefer something else? Any chord works:
@@ -118,7 +118,7 @@ Open the developer console. On load you should see:
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.5.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.6.0 ready. Hold E and tap R to inspect.
 ```
 
 Diagnostic commands:
@@ -145,7 +145,7 @@ A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
 |---|---|---|---|
 | `enable` | 0/1 | 1 | Master switch. |
 | `trigger` | combo/key/chat | combo | How to inspect. combo needs no bind at all. |
-| `combo` | see below | speed+use | Chord. Names: duck(Ctrl), speed(Shift), zoom, use(E), reload(R), jump, attack2(RMB), alt1, alt2 — joined with `+`. |
+| `combo` | see below | speed+use | Chord. Names: duck(Ctrl), speed(Shift 静步), zoom, use(E), reload(R), jump, attack2(RMB), alt1, alt2 — joined with `+`. |
 | `hold_time` | 0.0–3.0 | 0.30 | How long the chord must be held, preventing accidental triggers. |
 | `chat_command` | any text | !ammo | Chat trigger. **Always active**, never conflicts. |
 | `key` | alt1/alt2/zoom/reload | alt1 | Only used when trigger = key. |
@@ -154,7 +154,7 @@ A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
 | `output_chat` | 0/1 | 1 | Print ammo to the chat area. |
 | `output_center` | 0/1 | 1 | Print ammo at screen centre. |
 | `play_animation` | 0/1 | 1 | Drive the reload/inspect animation. |
-| `anim_source` | auto/deploy/idle/reload | auto | Which animation to prefer when the model has no dedicated inspect sequence. Most mods use deploy. |
+| `anim_source` | auto/pickup/deploy/idle/reload | auto | Which animation plays. auto = a real inspect/fidget anim if present, else the **item-pickup** idle (the one shown while staring at a pickupable item). |
 | `block_reload` | 0/1 | 1 | While E is held, report the magazine as full so the engine refuses to reload. True ammo is restored on release. |
 | `spoof_time` | 0.5–10.0 | 2.50 | Seconds the magazine is reported full after each inspect, covering the animation. |
 | `cooldown` | 0.0–10.0 | 1.20 | Seconds between inspects. |

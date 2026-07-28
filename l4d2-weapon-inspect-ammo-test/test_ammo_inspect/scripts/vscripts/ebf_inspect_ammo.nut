@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.5.0";
+EBFInspectAmmo.VERSION <- "1.6.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -53,7 +53,18 @@ EBFInspectAmmo.IN_RELOAD <- 8192;
 EBFInspectAmmo.IN_ALT1 <- 16384;
 EBFInspectAmmo.IN_ALT2 <- 32768;
 EBFInspectAmmo.IN_ZOOM <- 524288;
-EBFInspectAmmo.IN_SPEED <- 65536;
+// Verified against Source SDK game/shared/in_buttons.h:
+//   IN_SCORE = 1<<16 = 65536   (scoreboard)
+//   IN_SPEED = 1<<17 = 131072  (the "speed key" - in L4D2 this is Shift,
+//                               which makes you WALK slowly, not sprint;
+//                               L4D2 has no vanilla sprint)
+//   IN_WALK  = 1<<18 = 262144  (unused by L4D2)
+//   IN_ZOOM  = 1<<19 = 524288
+// v1.5.0 had IN_SPEED set to 65536, i.e. the scoreboard bit, so any combo
+// using "speed" could never fire.
+EBFInspectAmmo.IN_SCORE <- 65536;
+EBFInspectAmmo.IN_SPEED <- 131072;
+EBFInspectAmmo.IN_WALK  <- 262144;
 EBFInspectAmmo.IN_DUCK <- 4;
 
 // Selectable trigger keys, chosen by the "key" setting.
@@ -83,10 +94,12 @@ EBFInspectAmmo.Settings <- {
 	trigger = "combo"
 
 	// Chord used when trigger = combo. Any two or more of:
-	//   speed (Shift) | use (E) | duck (Ctrl) | zoom | reload (R) | jump
-	// Default speed+use = hold Shift then press E. Comfortable on the left
-	// hand, reads naturally on screen (no crouching), and neither key is a
-	// bindable target that script mods fight over the way +alt1 is.
+	//   speed (Shift = walk slowly) | use (E) | duck (Ctrl) | zoom
+	//   reload (R) | jump (Space) | attack2 (RMB)
+	// Default speed+use = hold Shift (L4D2's walk key) then press E.
+	// Comfortable on the left hand, no odd visual (you simply slow down for a
+	// moment), and neither key is a bindable target that script mods fight
+	// over the way +alt1 is.
 	combo = "speed+use"
 
 	// Seconds the chord must be held before it fires. Prevents accidental
@@ -103,7 +116,7 @@ EBFInspectAmmo.Settings <- {
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
 	anim_source = "auto"  // auto | deploy | idle | reload. Which animation to
-	                      // prefer when the model has no real inspect anim.
+	                      // auto | pickup | deploy | idle | reload.
 	block_reload = 1      // Report a full magazine while E is held.
 	spoof_time = 2.50     // Seconds the magazine is held "full" per inspect.
 	cooldown = 1.20       // Seconds between inspects, per player.
@@ -128,7 +141,7 @@ EBFInspectAmmo.Bounds <- {
 // Settings whose value is a word, not a number.
 EBFInspectAmmo.StringKeys <- {
 	trigger = ["combo", "key", "chat"]
-	anim_source = ["auto", "deploy", "idle", "reload"]
+	anim_source = ["auto", "pickup", "inspect", "deploy", "idle", "reload"]
 	key = ["alt1", "alt2", "zoom", "reload"]
 	modifier = ["none", "use", "duck", "speed"]
 };
@@ -238,7 +251,8 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"// combo           Chord for trigger=combo. Default speed+use,\n" +
 		"//                 i.e. hold Shift and press E.\n" +
 		"//                 Valid names, join with +:\n" +
-		"//                   duck (Ctrl)  speed (Shift)  zoom  use (E)\n" +
+		"//                   duck (Ctrl)   speed (Shift, walks slowly)\n" +
+		"//                   use (E)       zoom          jump (Space)\n" +
 		"//                   reload (R)   jump (Space)   attack2 (RMB)\n" +
 		"//                   alt1  alt2\n" +
 		"//                 Examples:  speed+use   duck+zoom   speed+attack2\n" +
@@ -257,19 +271,24 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"// modifier        Extra key to hold: none | use | duck | speed.\n" +
 		"//                 Default none. Only needed if your chosen key is\n" +
 		"//                 already used for something else.\n" +
-		"//                 use = E, duck = Ctrl, speed = Shift.\n" +
+		"//                 use = E, duck = Ctrl, speed = Shift (walk).\n" +
 		"// require_use     Legacy switch. 1 restores the old E+R binding and\n" +
 		"//                 overrides key/modifier. Default 0. Not recommended:\n" +
 		"//                 R has to serve two purposes, so quick taps can still\n" +
 		"//                 slip a real reload through.\n" +
 		"// output_chat     0 or 1. Ammo line in the chat area. Default 1.\n" +
 		"// output_center   0 or 1. Ammo line at screen center. Default 1.\n" +
-		"// anim_source     auto | deploy | idle | reload. Default auto.\n" +
-		"//                 Which animation to play when the model has no\n" +
-		"//                 dedicated inspect sequence. Most inspect weapon\n" +
-		"//                 mods put their animation on the DEPLOY/draw anim,\n" +
-		"//                 which auto tries first. Use 'reload' to force the\n" +
-		"//                 old behaviour, or 'idle' for mods that use idle.\n" +
+		"// anim_source     auto | pickup | deploy | idle | reload.\n" +
+		"//                 Default auto. Which animation the inspect plays.\n" +
+		"//                 auto   - a real inspect/fidget anim if the model\n" +
+		"//                          has one, otherwise the ITEM PICKUP anim.\n" +
+		"//                 pickup - force the item-pickup animation. This is\n" +
+		"//                          the one you see when staring at a\n" +
+		"//                          pickupable item, and is where most weapon\n" +
+		"//                          mods put their inspect animation.\n" +
+		"//                 deploy - the draw/pull-out animation (different!).\n" +
+		"//                 idle   - plain idle.\n" +
+		"//                 reload - force the reload animation.\n" +
 		"// play_animation  0 or 1. Drive the weapon's reload/inspect animation.\n" +
 		"//                 Custom weapon models that ship an inspect animation\n" +
 		"//                 will show it. Stock models show their reload. Default 1.\n" +
@@ -549,22 +568,58 @@ EBFInspectAmmo.FormatAmmo <- function (info)
 // Trying only "inspect" and then falling straight through to the reload
 // sequence is what made stock reload animations play instead of the mod's
 // inspect animation, which was the reported symptom.
+// Sequence names to try, in priority order.
+//
+// CORRECTED IN v1.6.0 after user feedback, verified against Valve's official
+// viewmodel QC prefabs (Mrfunreal/-L4D2_Weapon_Viewmodel_QC_Prefabs).
+//
+// The "full magazine inspect" that weapon mods ship is almost always attached
+// to the ITEM PICKUP animation set - the idle you see when you stand looking
+// at a pickupable item and the character holds the gun up and studies it.
+// The stock QC defines these as:
+//
+//   ACT_VM_ITEMPICKUP_EXTEND / _LOOP / _RETRACT     (hidden base sequences)
+//   ACT_VM_ITEMPICKUP_EXTEND_LAYER / _LOOP_LAYER    (what actually plays)
+//   ACT_VM_ITEMPICKUP_RETRACT_LAYER
+//
+// This is NOT the deploy/draw animation. v1.5.0 wrongly preferred deploy,
+// which is the "pull the weapon out" motion - a different animation entirely.
+// That mistake is why mods with a real inspect animation still looked wrong.
+//
+// IMPORTANT: we drive m_nLayerSequence, which plays a LAYER. The stock model
+// marks the non-layer variants "Hidden", so the *_LAYER names must be tried
+// first or the animation will not show.
+EBFInspectAmmo.PickupSeqNames <- [
+	"ACT_VM_ITEMPICKUP_LOOP_LAYER", "item_loop_layer",
+	"ACT_VM_ITEMPICKUP_EXTEND_LAYER", "item_extend_layer",
+	"ACT_VM_ITEMPICKUP_LOOP", "item_loop",
+	"ACT_VM_ITEMPICKUP_EXTEND", "item_extend",
+	// Helping-hand set: some mods hang the inspect off this instead.
+	"ACT_VM_HELPINGHAND_LOOP_LAYER", "helping_hand_loop_layer",
+	"ACT_VM_HELPINGHAND_LOOP", "helping_hand_loop"
+];
+
+// A genuinely dedicated inspect/fidget sequence, when the author added one.
+// ACT_VM_FIDGET is L4D2's real "inspect" activity.
 EBFInspectAmmo.InspectSeqNames <- [
-	"inspect", "ACT_VM_INSPECT", "idle_inspect", "inspect_start",
-	"inspect_empty", "lookat", "lookat01", "ACT_VM_FIDGET", "fidget"
+	"ACT_VM_FIDGET_LAYER", "fidget_layer",
+	"ACT_VM_FIDGET", "fidget",
+	"inspect_layer", "inspect", "ACT_VM_INSPECT",
+	"idle_inspect", "inspect_start", "lookat"
 ];
 
-// Deploy/draw sequences: where a great many inspect animations actually live.
+// Deploy/draw: the "pull the weapon out" motion. Kept only as an opt-in.
 EBFInspectAmmo.DeploySeqNames <- [
-	"ACT_VM_DRAW", "draw", "deploy", "ACT_VM_DEPLOY", "ACT_VM_DRAW_EMPTY"
+	"ACT_VM_DEPLOY_LAYER", "deploy_layer",
+	"ACT_VM_DEPLOY", "deploy", "ACT_VM_DRAW", "draw"
 ];
 
-// Idle variants, which some mods use for the full-magazine inspect.
 EBFInspectAmmo.IdleSeqNames <- [
 	"ACT_VM_IDLE", "idle"
 ];
 
 EBFInspectAmmo.ReloadSeqNames <- [
+	"ACT_VM_RELOAD_LAYER", "reload_layer",
 	"ACT_VM_RELOAD", "reload", "ACT_SHOTGUN_RELOAD_START"
 ];
 
@@ -607,14 +662,39 @@ EBFInspectAmmo.PlayInspectAnim <- function (player, weapon, verbose)
 
 	// Priority: real inspect > deploy (where most mods put it) > configured
 	// preference > reload as the last resort.
-	local pick = FindSequence(vm, InspectSeqNames);
+	// Priority (anim_source = auto):
+	//   1. a dedicated inspect/fidget sequence, if the model has one
+	//   2. the ITEM PICKUP set - where mods actually put the inspect
+	//   3. reload, only as a last resort
+	// Deploy and idle are opt-in, because they are different motions.
+	local pick = null;
 
-	if (pick == null && Settings.anim_source != "reload")
-		pick = FindSequence(vm, DeploySeqNames);
+	switch (Settings.anim_source)
+	{
+		case "pickup":
+			pick = FindSequence(vm, PickupSeqNames);
+			break;
 
-	if (pick == null && Settings.anim_source == "idle")
-		pick = FindSequence(vm, IdleSeqNames);
+		case "deploy":
+			pick = FindSequence(vm, DeploySeqNames);
+			break;
 
+		case "idle":
+			pick = FindSequence(vm, IdleSeqNames);
+			break;
+
+		case "reload":
+			pick = FindSequence(vm, ReloadSeqNames);
+			break;
+
+		default: // "auto"
+			pick = FindSequence(vm, InspectSeqNames);
+			if (pick == null)
+				pick = FindSequence(vm, PickupSeqNames);
+			break;
+	}
+
+	// Last resort so something always plays.
 	if (pick == null)
 		pick = FindSequence(vm, ReloadSeqNames);
 

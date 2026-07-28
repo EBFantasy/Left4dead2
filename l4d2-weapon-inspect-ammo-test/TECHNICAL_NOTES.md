@@ -278,20 +278,61 @@ door while running never triggers an inspect.
 
 ### Finding the right animation
 
-A separate reported bug: weapons that *do* have a full-magazine inspect
-animation still played their reload animation.
+Two corrections here, both from user reports.
 
-Cause: the search only tried literal `inspect`-style names, then fell straight
-through to the reload sequence. But most L4D2 inspect weapon mods hang the
-animation off the **deploy/draw** sequence, since raising and looking over the
-gun already is the inspect motion.
+**v1.5.0 guessed wrong.** It preferred the DEPLOY/draw sequence, on the
+assumption that "raising and looking over the gun" was the inspect motion.
+That is a different animation: deploy is *pulling the weapon out*.
 
-The priority is now: dedicated inspect names -> deploy/draw -> (optionally
-idle) -> reload as a last resort. `anim_source` (`auto`/`deploy`/`idle`/
-`reload`) overrides this, and `Status()` now dumps **every** sequence in the
-loaded viewmodel so an unusual name can simply be read off and configured.
+The animation players actually mean by "full-magazine inspect" is the
+**item-pickup idle** — what you see when you stand looking at a pickupable
+item and the character holds the weapon up and studies it. Confirmed against
+Valve's official viewmodel QC prefabs:
 
-### Nothing to leak
+```
+$Sequence "item_extend"        ... "ACT_VM_ITEMPICKUP_EXTEND" 1        Hidden
+$Sequence "item_extend_layer"  ... "ACT_VM_ITEMPICKUP_EXTEND_LAYER" 1
+$Sequence "item_loop"          ... "ACT_VM_ITEMPICKUP_LOOP" 1          Hidden
+$Sequence "item_loop_layer"    ... "ACT_VM_ITEMPICKUP_LOOP_LAYER" 1    loop
+$Sequence "item_retract"       ... "ACT_VM_ITEMPICKUP_RETRACT" 1       Hidden
+```
+
+**The `_LAYER` variants matter.** We drive `m_nLayerSequence`, which plays a
+layer, and the stock QC marks the non-layer sequences `Hidden`. Searching for
+`item_loop` before `item_loop_layer` can therefore resolve to a hidden
+sequence that never appears. The `*_LAYER` names are now tried first, for the
+reload fallback too.
+
+Priority with `anim_source auto`:
+
+1. a dedicated inspect/fidget sequence (`ACT_VM_FIDGET` is L4D2's real
+   "inspect" activity), if the model has one
+2. the ITEM PICKUP set — where mods overwhelmingly put it
+3. reload, only so that *something* plays
+
+`anim_source` can force `pickup`, `deploy`, `idle` or `reload`, and `Status()`
+dumps every sequence in the loaded viewmodel so an unusual name can be read
+off and configured.
+
+### Getting the button bits right
+
+`IN_SPEED` was defined as `65536`. That is `IN_SCORE`, the scoreboard bit.
+Any combo containing `speed` could therefore never fire — the default
+`speed+use` included. Verified against Source SDK `game/shared/in_buttons.h`:
+
+| Constant | Shift | Value |
+|---|---|---|
+| `IN_SCORE` | `1<<16` | 65536 |
+| `IN_SPEED` | `1<<17` | 131072 |
+| `IN_WALK` | `1<<18` | 262144 |
+| `IN_ZOOM` | `1<<19` | 524288 |
+
+Terminology note, also from user feedback: in L4D2 **Shift is the walk key**.
+It makes the survivor move *slowly and quietly*. L4D2 has no vanilla sprint,
+so earlier comments calling `IN_SPEED` "sprint" were wrong. The engine name is
+"speed key"; the in-game effect is walking.
+
+### Nothing to leak### Nothing to leak
 
 Since v1.5.0 there is no spoofed state to restore: the script only ever clears
 `m_bInReload` and pushes timing fields forward. The inspect window closes on a
