@@ -105,16 +105,44 @@ right.
 
 ---
 
-## 4. Recommendation
+## 4. How to test it (read this before packing)
 
-1. Try `smooth_recoil_punch.nut` (set `SR_USE_PUNCH <- true` in
-   `mapspawn_addon.nut`, and disable the old core so recoil is not applied
-   twice). Confirm with `script SmoothRecoilPunch.Status()` that
-   `punch prop : OK`.
-2. Judge the feel. If Valve's recovery shape is acceptable, this is a complete
-   pure-workshop solution and no SourceMod is needed.
-3. If you specifically want your own recovery curve, upload the SourceMod
-   version and we optimise that instead.
+**The punch prototype is now the default.** Pack and play - there is no
+console command to type and no cvar to set.
+
+`mapspawn_addon.nut` has a single switch near the top:
+
+```squirrel
+::SR_MODE <- "punch";     // default: the new punch-angle engine
+// ::SR_MODE <- "legacy"; // the old SnapEyeAngles core, for comparison
+```
+
+`director_base_addon.nut` reads the same value, so there is only one place to
+change and no way to accidentally load both cores at once (which would apply
+recoil twice).
+
+On load the console prints which engine is active:
+
+```
+[SR] mode = punch
+[SRP] punch-angle prototype 0.9.0-punch loaded
+```
+
+Optional sanity check in the developer console:
+
+```
+script SmoothRecoilPunch.Status()    // expect "punch prop : OK"
+script SmoothRecoilPunch.TestKick()  // one shot's recoil, without firing
+```
+
+If you want to compare against the old behaviour, set `SR_MODE` to `"legacy"`
+and repack.
+
+## 5. Recommendation
+Judge the feel. If Valve's recovery shape is acceptable, this is a complete
+pure-workshop solution and no SourceMod is needed. If you specifically want
+your own recovery curve or true aim-point compensation, upload the SourceMod
+version and we optimise that instead.
 
 I would not spend more time tuning the `SnapEyeAngles` core. Every knob there
 trades one of your two complaints against the other.
