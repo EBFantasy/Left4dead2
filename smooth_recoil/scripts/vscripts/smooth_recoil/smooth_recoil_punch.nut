@@ -132,6 +132,15 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 // Safety clamp so a bad config can never throw the view to the sky.
 ::SmoothRecoilPunch.rawset("MAX_PITCH", 24.0);
 
+// If a single write per shot is not reaching the client (its prediction
+// recomputes DecayPunchAngle every tick and can overwrite a one-off server
+// write), re-assert the punch angle every frame for a short window after each
+// shot. This costs one netprop write per frame while recoiling and nothing at
+// all when idle.
+//   0 = write once per shot only (original behaviour)
+//   > 0 = seconds to keep re-asserting
+::SmoothRecoilPunch.rawset("REASSERT_TIME", 0.45);
+
 ::SmoothRecoilPunch.rawset("_players", {});
 ::SmoothRecoilPunch.rawset("_shotLogs", 0);
 
@@ -192,7 +201,10 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			shots = 0,
 			lastShot = 0.0,
 			clip = -1,
-			weapon = ""
+			weapon = "",
+			reassertUntil = 0.0,
+			holdAng = null,
+			holdVel = null
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -282,10 +294,31 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		return false;
 	}
 
+	// Remember what we just wrote so Tick() can re-assert it.
+	if (::SmoothRecoilPunch.REASSERT_TIME > 0.0) {
+		try {
+			state.holdAng = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
+			state.holdVel = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL);
+			state.reassertUntil = Time() + ::SmoothRecoilPunch.REASSERT_TIME;
+		} catch (e) { }
+	}
+
 	if (::SmoothRecoilPunch.DEBUG && ::SmoothRecoilPunch._shotLogs < 30) {
 		::SmoothRecoilPunch._shotLogs += 1;
+
+		// Read the values straight back. If these come back as zero the write
+		// is not landing at all; if they hold the value but the view does not
+		// move, the client's prediction is overwriting it.
+		local rbAng = "n/a";
+		local rbVel = "n/a";
+		try {
+			rbAng = "" + NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
+			rbVel = "" + NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL);
+		} catch (e) { }
+
 		::SmoothRecoilPunch.Dbg("shot#" + state.shots + " " + cls
-			+ " pitch=" + pitch + " yaw=" + yaw + " ramp=" + ramp);
+			+ " pitch=" + pitch + " yaw=" + yaw + " ramp=" + ramp
+			+ " | readback ang=" + rbAng + " vel=" + rbVel);
 	}
 
 	return true;
@@ -366,6 +399,32 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		}
 
 		state.clip = clip;
+
+		// Re-assert the punch while the window is open. The client predicts
+		// DecayPunchAngle every tick, so a single server write can be undone
+		// before it is ever displayed. Writing it again each frame keeps the
+		// value present until the recoil has visibly played out.
+		if (state.reassertUntil > 0.0) {
+			if (Time() >= state.reassertUntil) {
+				state.reassertUntil = 0.0;
+				state.holdAng = null;
+				state.holdVel = null;
+			} else if (state.holdAng != null) {
+				try {
+					local curAng = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
+					// Only push back up if the client has flattened it.
+					if (curAng == null || curAng.x > state.holdAng.x) {
+						NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH, state.holdAng);
+						if (state.holdVel != null)
+							NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL, state.holdVel);
+					} else {
+						// Client is animating it properly - track the value so
+						// we follow the spring instead of freezing the view.
+						state.holdAng = curAng;
+					}
+				} catch (e) { }
+			}
+		}
 	}
 });
 
