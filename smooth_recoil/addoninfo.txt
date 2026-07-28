@@ -1,0 +1,11 @@
+"AddonInfo"
+{
+	"addonSteamAppID"                  "550"
+	"addonTitle"                       "Smooth Recoil"
+	"addonVersion"                     "0.8.2"
+	"addonAuthor"                      "EpicBF"
+
+	"addonContent_Script"              "1"
+
+	"addonDescription"                 "Smooth per-weapon vertical recoil and configurable recovery for survivor firearms."
+}
