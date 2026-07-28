@@ -1,5 +1,18 @@
-if (!("ScarAutoSyntheticShoveUntil" in getroottable()))
-    ::ScarAutoSyntheticShoveUntil <- {}
+// ADS compatibility: single-use token marking a shove that THIS script
+// synthesised for its auto/burst rhythm, so the ADS addon can tell it apart
+// from a shove the player actually pressed.
+//
+// v2: this used to be a 0.35s time window (ScarAutoSyntheticShoveUntil).
+// A window is wrong for two reasons:
+//   - a real right-click landing inside the window was misread as synthetic
+//     and swallowed, which is the "shove does nothing" report;
+//   - the stale entry survived until it expired, so a later real shove could
+//     still be consumed, producing the delayed/chained shoves.
+// The token is now set exactly when the synthetic shove bit goes on and
+// cleared exactly when it goes off, so one synthetic shove consumes at most
+// one check and a real shove is never inside the token's lifetime.
+if (!("ScarAutoSyntheticShove" in getroottable()))
+    ::ScarAutoSyntheticShove <- {}
 
 ::greenyoshiyt_scarL_mode <-
 {
@@ -259,6 +272,11 @@ if (!("ScarAutoSyntheticShoveUntil" in getroottable()))
                     NetProps.SetPropFloat(weapon, "m_flNextPrimaryAttack", NewAttack);
                     NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", NewAttack);
                     NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") &~ 2048)
+                    // The synthetic shove is over; drop the token in the same
+                    // place the forced bit is cleared so it can never linger
+                    // and swallow a later real right-click.
+                    if (greenyoshiyt.GetEntityIndex() in ::ScarAutoSyntheticShove)
+                        delete ::ScarAutoSyntheticShove[greenyoshiyt.GetEntityIndex()]
 
                     //Replace the animation after shoving
                     local view_model = NetProps.GetPropEntity(greenyoshiyt, "m_hViewModel");
@@ -292,7 +310,8 @@ if (!("ScarAutoSyntheticShoveUntil" in getroottable()))
                         local NewAttack = PreviousAttack + custom_aspd
 
 
-                        ::ScarAutoSyntheticShoveUntil[greenyoshiyt.GetEntityIndex()] <- Time() + 0.35
+                        // Mark this shove as script-synthesised, then force it.
+                        ::ScarAutoSyntheticShove[greenyoshiyt.GetEntityIndex()] <- true
                         NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") | 2048)
                         greenyoshiyt_scarL_mode.PlayerAttack[greenyoshiyt] <- PreviousAttack
 
@@ -686,7 +705,7 @@ if (!("ScarAutoSyntheticShoveUntil" in getroottable()))
 
     function Init()
     {    
-		::ScarAutoSyntheticShoveUntil.clear()
+		::ScarAutoSyntheticShove.clear()
         EntFire("worldspawn", "RunScriptCode", "DirectorScript.greenyoshiyt_scarL_mode.SlowerInit()", 0.5, null)
 
         //Timer stuff

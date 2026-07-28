@@ -2194,14 +2194,26 @@ New/Modify animations:
 	
 	function IsCloseADSWhileAction(action, state, nextTime, player = null)
 	{
-		if (action == "shove" && player != null && "ScarAutoSyntheticShoveUntil" in getroottable())
+		// SCAR auto/burst compatibility.
+		//
+		// The SCAR script synthesises a shove to reset its burst rhythm. That
+		// synthetic shove must not drop the player out of ADS, but a shove the
+		// player actually pressed still must.
+		//
+		// The SCAR script sets a single-use token for exactly as long as its
+		// forced shove bit is held. Consume it here: if a token is present this
+		// shove is the synthetic one, so ignore it AND remove the token, so the
+		// very next shove is treated as real. Previously this was a 0.35s time
+		// window, which both swallowed real right-clicks that happened to fall
+		// inside it and left stale entries behind - the reported "shove does
+		// nothing, then fires several times later" behaviour.
+		if (action == "shove" && player != null && "ScarAutoSyntheticShove" in getroottable())
 		{
 			local playerIndex = player.GetEntityIndex();
-			if (playerIndex in ::ScarAutoSyntheticShoveUntil)
+			if (playerIndex in ::ScarAutoSyntheticShove)
 			{
-				if (Time() <= ::ScarAutoSyntheticShoveUntil[playerIndex])
-					return false;
-				delete ::ScarAutoSyntheticShoveUntil[playerIndex];
+				delete ::ScarAutoSyntheticShove[playerIndex];
+				return false;
 			}
 		}
 

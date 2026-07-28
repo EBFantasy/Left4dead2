@@ -778,8 +778,8 @@ if (!("IdleTeleportBot" in getroottable()))
 
 // ---- 配置: 酸液 ----
 ::ACID_CFG_PATH <- "aba spitter response cfg/aba spitter response.txt";
-::DEFAULT_ACID_CFG <- "AcidDamageScale 0.5\nAcidPreEvasionTimeout 1.0\nAcidPoolEvasionTimeout 5.0\nAcidClearGrace 3.0\n.\n.\n// AcidDamageScale = bot acid damage multiplier.\n// 0 = full acid immunity and active acid evasion is disabled.\n// Non-zero values below 0.1 are clamped to 0.1.\n// Examples: 1.0 = normal damage, 0.8 = 80% damage, 0.5 = half damage.\n.\n// ABA mount notes:\n// This module owns insect_swarm and spitter_projectile avoidance. ABA's fire,\n// tank, common/special infected combat, rescue, pickup, and shove tasks remain active.\n.\n// AcidPreEvasionTimeout = Pre-evasion warning timeout in seconds.\n// AcidPoolEvasionTimeout = Pool/projectile evasion timeout in seconds.\n// AcidClearGrace = Grace period before clearing per-bot acid state.\n.\n// Auto-generated. Delete and reload to reset.\n.\n";
-::g_AcidCfg <- { AcidImmunity = 0, AcidDamageScale = 0.5, AcidPreEvasionTimeout = 1.0, AcidPoolEvasionTimeout = 5.0, AcidClearGrace = 3.0 };
+::DEFAULT_ACID_CFG <- "AcidDamageScale 0.5\nAcidPreEvasionTimeout 1.0\nAcidPoolEvasionTimeout 5.0\nAcidClearGrace 3.0\n.\n.\n// AcidDamageScale = bot acid damage multiplier.\n// 0 = full acid immunity and active acid evasion is disabled.\n// Non-zero values below 0.1 are clamped to 0.1.\n// Examples: 1.0 = normal damage, 0.8 = 80% damage, 0.5 = half damage.\n.\n// ABA mount notes:\n// This module owns insect_swarm and spitter_projectile avoidance. ABA's fire,\n// tank, common/special infected combat, rescue, pickup, and shove tasks remain active.\n.\n// AcidPreEvasionTimeout = Pre-evasion warning timeout in seconds.\n// AcidPoolEvasionTimeout = Pool/projectile evasion timeout in seconds.\n// AcidClearGrace = Grace period before clearing per-bot acid state.\n.\n// AcidLingerAfterGone = Seconds a pool stays dangerous AFTER its entity is\n// removed. The insect_swarm entity disappears slightly before the acid stops\n// hurting, so without this bots walk in during the final moments, which is\n// when the damage is highest. 0 restores the old behaviour.\n.\n// AcidEndgameBoost = Hazard radius multiplier applied to a pool that is in its\n// final second, and to lingering ghost pools. Makes bots give dying pools a\n// wider berth instead of clipping the edge.\n.\n// Auto-generated. Delete and reload to reset.\n.\n";
+::g_AcidCfg <- { AcidImmunity = 0, AcidDamageScale = 0.5, AcidPreEvasionTimeout = 1.0, AcidPoolEvasionTimeout = 5.0, AcidClearGrace = 3.0, AcidLingerAfterGone = 1.2, AcidEndgameBoost = 1.35 };
 
 ::LoadAcidCfg <- function()
 {
@@ -793,7 +793,7 @@ if (!("IdleTeleportBot" in getroottable()))
         try { StringToFile(::ACID_CFG_PATH, content); }
         catch (e) { printl("[ABA-Spitter][WARN] failed to append AcidDamageScale cfg: " + e); }
     }
-    ::g_AcidCfg = ::ParseSimpleCfg(content, { AcidImmunity = 0, AcidDamageScale = 0.5, AcidPreEvasionTimeout = 1.0, AcidPoolEvasionTimeout = 5.0, AcidClearGrace = 3.0 });
+    ::g_AcidCfg = ::ParseSimpleCfg(content, { AcidImmunity = 0, AcidDamageScale = 0.5, AcidPreEvasionTimeout = 1.0, AcidPoolEvasionTimeout = 5.0, AcidClearGrace = 3.0, AcidLingerAfterGone = 1.2, AcidEndgameBoost = 1.35 });
 };
 
 ::GetAcidDamageScale <- function()
@@ -934,6 +934,9 @@ else
 // birth_t = 酸池首次被发现的时间戳
 // pos = 酸池位置（用于调试）
 ::g_AcidPoolLifetime <- {};
+// Pools whose entity has been removed but whose ground is still treated as
+// dangerous for a short while. [{pos, expire}, ...]
+::g_AcidGhostPools <- [];
 
 // 检查从 botPos 朝 (nx, ny) 方向走 distance 单位是否安全 (无致命落差)
 // 复用 FallPreventHeight 阈值, 默认 250 单位
@@ -1353,6 +1356,17 @@ if (::g_AcidDebug == 1)
             // per-bot scoring below sees every nearby pool and the safe side.
         }
     }
+    // The insect_swarm entity is removed slightly BEFORE the acid stops
+    // hurting. Deleting our record here made evasion release instantly, which
+    // is exactly why bots stepped in during the last fraction of a second -
+    // the point at which the pool does the most damage.
+    //
+    // Instead, remember the pool as a "ghost" for AcidLingerAfterGone seconds
+    // and keep treating its position as hazardous.
+    local lingerSecs = 1.2;
+    if ("AcidLingerAfterGone" in ::g_AcidCfg)
+        lingerSecs = ::g_AcidCfg.AcidLingerAfterGone.tofloat();
+
     local stale = [];
     foreach (k, v in ::g_SeenAcidPoolIdx)
     {
@@ -1361,8 +1375,25 @@ if (::g_AcidDebug == 1)
     foreach (k in stale)
     {
         delete ::g_SeenAcidPoolIdx[k];
-        if (k in ::g_AcidPoolLifetime) delete ::g_AcidPoolLifetime[k];
+        if (k in ::g_AcidPoolLifetime)
+        {
+            if (lingerSecs > 0.0)
+            {
+                local rec = ::g_AcidPoolLifetime[k];
+                if ("pos" in rec && rec.pos != null)
+                    ::g_AcidGhostPools.append({ pos = rec.pos, expire = now + lingerSecs });
+            }
+            delete ::g_AcidPoolLifetime[k];
+        }
     }
+
+    // Drop ghosts whose linger time has elapsed.
+    local liveGhosts = [];
+    foreach (g in ::g_AcidGhostPools)
+    {
+        if (g.expire > now) liveGhosts.append(g);
+    }
+    ::g_AcidGhostPools = liveGhosts;
 
     // ---- (保留) 收集 spitter 抛射物 ----
     local projectiles = [];
@@ -1378,7 +1409,7 @@ if (::g_AcidDebug == 1)
 
     // 全局无危险 → 短返
     local forcedDamageActive = ::ABA_Spitter_HasForcedAcidDamage(now);
-    if (acidPools.len() == 0 && projectiles.len() == 0 && ::g_ActiveSpits.len() == 0 && !forcedDamageActive)
+    if (acidPools.len() == 0 && projectiles.len() == 0 && ::g_ActiveSpits.len() == 0 && ::g_AcidGhostPools.len() == 0 && !forcedDamageActive)
     {
         ::ABA_Spitter_ClearAllBotAcidStates("no-acid-sources", true);
         return 0.5;
@@ -1496,6 +1527,35 @@ if (::g_AcidDebug == 1)
         local nearestRawPoolD2 = 999999999.0;
         local actuallyInPool = false;
         local poolCnt = 0; local poolScoreCnt = 0; local projCnt = 0; local spitCnt = 0;
+
+        // Ghost pools: the entity is gone but the ground can still hurt.
+        // Treated with a slightly enlarged radius so bots keep clear of the
+        // dying pool's edge rather than clipping it.
+        local endBoost = 1.35;
+        if ("AcidEndgameBoost" in ::g_AcidCfg)
+            endBoost = ::g_AcidCfg.AcidEndgameBoost.tofloat();
+        if (endBoost < 1.0) endBoost = 1.0;
+
+        foreach (ghost in ::g_AcidGhostPools)
+        {
+            local gdz = ghost.pos.z - botPos.z;
+            if (abs(gdz) > VERTICAL_IGNORE_Z) continue;
+            local gdx = ghost.pos.x - botPos.x;
+            local gdy = ghost.pos.y - botPos.y;
+            local gd2 = gdx*gdx + gdy*gdy;
+            if (gd2 < POOL_SCORE_R2 * endBoost)
+            {
+                if (gd2 < nearestRawPoolD2) nearestRawPoolD2 = gd2;
+                local ghostHazard = { x = ghost.pos.x, y = ghost.pos.y, weight = 1.0 };
+                hazards.append(ghostHazard);
+                poolScoreCnt++;
+                if (gd2 < POOL_R2 * endBoost)
+                {
+                    activeHazards.append(ghostHazard);
+                    poolCnt++;
+                }
+            }
+        }
 
         foreach (acid in acidPools)
         {
