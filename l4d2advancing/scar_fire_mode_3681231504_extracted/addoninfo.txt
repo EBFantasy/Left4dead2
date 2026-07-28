@@ -1,0 +1,13 @@
+"AddonInfo"
+{
+     addonSteamAppID 550
+     addontitle "Scar-L"
+     addonversion "beta"
+     addontagline "Weapon"1
+     addonauthor "greenyoshiyt"
+     addonSteamGroupName ""
+     addonauthorSteamID "noobyoshiyt"
+     addonContent_script 1
+     addonURL0 ""
+     addonDescription               "brrrrrrrrr"
+}

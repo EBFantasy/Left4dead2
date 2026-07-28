@@ -1,0 +1,16 @@
+"AddonInfo"
+{
+	"addonSteamAppID"                  "550"
+	"addonTitle"                       "SCAR Fire Mode + ADS Compatibility"
+	"addonVersion"                     "1.982"
+	"addonAuthor"                      "lxc(4512369781) + greenyoshiyt"
+	"addonAuthorSteamID"               "https://steamcommunity.com/profiles/76561198052420500/myworkshopfiles/"
+	"addonURL0"                        "https://steamcommunity.com/sharedfiles/filedetails/?id=3576501343"
+	"addonURL1"                        "https://steamcommunity.com/sharedfiles/filedetails/?id=3681231504"
+	
+	"addonContent_Script"              "1"
+	
+	"addonDescription"                 "Combined compatibility build for SCAR Fire Mode Selector and Aim Down Sight. Requires ADS-capable weapon models.
+
+Settings file in 'left4dead2/ems/lxc/ads_base/'."
+}
