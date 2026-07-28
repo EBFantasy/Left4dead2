@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.4.0
+// [TEST] Weapon Inspect Ammo Check 1.5.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -15,16 +15,16 @@
 //                 key   - a single trigger key (see 'key' below).
 //                 chat  - chat command only.
 //                 The chat command below ALWAYS works as well.
-// combo           Chord for trigger=combo. Default duck+speed,
-//                 i.e. hold Ctrl and Shift together.
+// combo           Chord for trigger=combo. Default speed+use,
+//                 i.e. hold Shift and press E.
 //                 Valid names, join with +:
 //                   duck (Ctrl)  speed (Shift)  zoom  use (E)
 //                   reload (R)   jump (Space)   attack2 (RMB)
 //                   alt1  alt2
-//                 Examples:  duck+speed   duck+zoom   speed+attack2
+//                 Examples:  speed+use   duck+zoom   speed+attack2
 // hold_time       0.0 to 3.0. Seconds the chord must be held before
-//                 it fires. Default 0.45, so ordinary crouch-walking
-//                 does not trigger it. Lower it for a snappier feel.
+//                 it fires. Default 0.30, so simply using E on a door
+//                 while running never triggers it. Lower for snappier.
 // chat_command    Chat text that inspects. Default !ammo.
 //                 Always active, cannot conflict with any bind.
 //
@@ -44,6 +44,12 @@
 //                 slip a real reload through.
 // output_chat     0 or 1. Ammo line in the chat area. Default 1.
 // output_center   0 or 1. Ammo line at screen center. Default 1.
+// anim_source     auto | deploy | idle | reload. Default auto.
+//                 Which animation to play when the model has no
+//                 dedicated inspect sequence. Most inspect weapon
+//                 mods put their animation on the DEPLOY/draw anim,
+//                 which auto tries first. Use 'reload' to force the
+//                 old behaviour, or 'idle' for mods that use idle.
 // play_animation  0 or 1. Drive the weapon's reload/inspect animation.
 //                 Custom weapon models that ship an inspect animation
 //                 will show it. Stock models show their reload. Default 1.
@@ -63,8 +69,8 @@
 // ============================================================
 enable 1
 trigger combo
-combo duck+speed
-hold_time 0.45
+combo speed+use
+hold_time 0.30
 chat_command !ammo
 key alt1
 modifier none
@@ -72,6 +78,7 @@ require_use 0
 output_chat 1
 output_center 1
 play_animation 1
+anim_source auto
 block_reload 1
 spoof_time 2.50
 cooldown 1.20

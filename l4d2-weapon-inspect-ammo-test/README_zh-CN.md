@@ -1,8 +1,8 @@
 # [TEST] 武器检视弹药查看
 
-当前版本：`1.4.0`。**这是一个测试性质的项目。**
+当前版本：`1.5.0`。**这是一个测试性质的项目。**
 
-一个独立的《求生之路 2》**VScript 插件（VPK）**。**同时按住 Ctrl + Shift**（或在聊天栏输入 `!ammo`），即可“检视”手中的武器：
+一个独立的《求生之路 2》**VScript 插件（VPK）**。**按住 Shift 再按 E**（或在聊天栏输入 `!ammo`），即可“检视”手中的武器：
 
 - 武器播放它自己的**换弹 / 检视动作**；
 - **剩余弹药量**同时输出到聊天栏和屏幕正中；
@@ -79,7 +79,7 @@ addons 文件夹即可。
 
 **开箱即用，不需要绑定任何按键。**
 
-游戏中**同时按住 Ctrl + Shift 约 0.45 秒**即可检视。
+游戏中**按住 Shift 再按 E**（约 0.3 秒）即可检视。
 
 或者在聊天栏输入：
 
@@ -87,11 +87,11 @@ addons 文件夹即可。
 !ammo
 ```
 
-> **为什么用组合键而不是 `+alt1`？**
-> `+alt1`、`+alt2` 这类"空闲"输入位，在重度脚本/mod 玩家手上基本都被占用了。
-> 而 Ctrl 和 Shift 是移动键，**不占用任何可绑定键位**，不会和你现有的脚本 mod 抢
-> 资源。单独按 Ctrl（下蹲）或单独按 Shift（行走）都不会触发，必须两个键**同时按住**
-> 超过 `hold_time` 才会触发，所以正常蹲走不会误触发。
+> **为什么是 Shift+E？**
+> `+alt1`/`+alt2` 这类"空闲"输入位，在重度脚本玩家手上基本都被占了。Shift 和 E
+> 是既有操作，**不占用任何可绑定键位**，左手姿势自然，画面上也不会出现"先蹲一下"
+> 这种反直觉动作。单独按 Shift（加速）或单独按 E（开门/急救）都不会触发，必须
+> **按住 Shift 的同时按 E** 并保持 `hold_time` 才触发。
 
 如果你觉得 Ctrl+Shift 不顺手，可以在配置里改成任意组合，例如：
 
@@ -114,7 +114,7 @@ key alt1
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.4.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.5.0 ready. Hold E and tap R to inspect.
 ```
 
 诊断命令：
@@ -141,8 +141,8 @@ left4dead2\ems\ebf_inspect_ammo\settings.txt
 |---|---|---|---|
 | `enable` | 0/1 | 1 | 总开关。 |
 | `trigger` | combo/key/chat | combo | 触发方式。combo=组合键（无需绑定），key=单键，chat=仅聊天。 |
-| `combo` | 见下 | duck+speed | 组合键。可用名：duck(Ctrl)、speed(Shift)、zoom、use(E)、reload(R)、jump、attack2(右键)、alt1、alt2，用 `+` 连接。 |
-| `hold_time` | 0.0–3.0 | 0.45 | 组合键需按住多久才触发，防止误触。 |
+| `combo` | 见下 | speed+use | 组合键。可用名：duck(Ctrl)、speed(Shift)、zoom、use(E)、reload(R)、jump、attack2(右键)、alt1、alt2，用 `+` 连接。 |
+| `hold_time` | 0.0–3.0 | 0.30 | 组合键需按住多久才触发，防止误触。 |
 | `chat_command` | 任意文本 | !ammo | 聊天命令，**任何模式下都有效**，绝不冲突。 |
 | `key` | alt1/alt2/zoom/reload | alt1 | 仅 trigger=key 时使用。 |
 | `modifier` | none/use/duck/speed | none | 仅 trigger=key 时的额外按键。 |
@@ -150,6 +150,7 @@ left4dead2\ems\ebf_inspect_ammo\settings.txt
 | `output_chat` | 0/1 | 1 | 在聊天栏输出弹药量。 |
 | `output_center` | 0/1 | 1 | 在屏幕正中输出弹药量。 |
 | `play_animation` | 0/1 | 1 | 播放换弹/检视动作。 |
+| `anim_source` | auto/deploy/idle/reload | auto | 无专用检视动画时优先播放哪个。多数检视 mod 把动画挂在 deploy 上。 |
 | `block_reload` | 0/1 | 1 | 按住 E 时把弹匣临时报告为满，使引擎拒绝换弹；松开 E 立即还原真实弹数。 |
 | `spoof_time` | 0.5–10.0 | 2.50 | 每次检视后，弹匣被报告为"满"的秒数，用于覆盖动画时长。 |
 | `cooldown` | 0.0–10.0 | 1.20 | 两次检视之间的冷却秒数。 |

@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.4.0";
+EBFInspectAmmo.VERSION <- "1.5.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -83,14 +83,15 @@ EBFInspectAmmo.Settings <- {
 	trigger = "combo"
 
 	// Chord used when trigger = combo. Any two or more of:
-	//   duck (Ctrl) | speed (Shift) | zoom | use (E) | reload (R) | jump
-	// Default duck+speed: crouch-walking is harmless, and neither key is ever
-	// consumed by script mods the way +alt1 is.
-	combo = "duck+speed"
+	//   speed (Shift) | use (E) | duck (Ctrl) | zoom | reload (R) | jump
+	// Default speed+use = hold Shift then press E. Comfortable on the left
+	// hand, reads naturally on screen (no crouching), and neither key is a
+	// bindable target that script mods fight over the way +alt1 is.
+	combo = "speed+use"
 
 	// Seconds the chord must be held before it fires. Prevents accidental
 	// triggers while crouch-walking normally.
-	hold_time = 0.45
+	hold_time = 0.30
 
 	// Chat command that also triggers an inspect. Type it in chat.
 	chat_command = "!ammo"
@@ -101,6 +102,8 @@ EBFInspectAmmo.Settings <- {
 	output_chat = 1       // Print the ammo line to the chat area.
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
+	anim_source = "auto"  // auto | deploy | idle | reload. Which animation to
+	                      // prefer when the model has no real inspect anim.
 	block_reload = 1      // Report a full magazine while E is held.
 	spoof_time = 2.50     // Seconds the magazine is held "full" per inspect.
 	cooldown = 1.20       // Seconds between inspects, per player.
@@ -125,6 +128,7 @@ EBFInspectAmmo.Bounds <- {
 // Settings whose value is a word, not a number.
 EBFInspectAmmo.StringKeys <- {
 	trigger = ["combo", "key", "chat"]
+	anim_source = ["auto", "deploy", "idle", "reload"]
 	key = ["alt1", "alt2", "zoom", "reload"]
 	modifier = ["none", "use", "duck", "speed"]
 };
@@ -231,16 +235,16 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//                 key   - a single trigger key (see 'key' below).\n" +
 		"//                 chat  - chat command only.\n" +
 		"//                 The chat command below ALWAYS works as well.\n" +
-		"// combo           Chord for trigger=combo. Default duck+speed,\n" +
-		"//                 i.e. hold Ctrl and Shift together.\n" +
+		"// combo           Chord for trigger=combo. Default speed+use,\n" +
+		"//                 i.e. hold Shift and press E.\n" +
 		"//                 Valid names, join with +:\n" +
 		"//                   duck (Ctrl)  speed (Shift)  zoom  use (E)\n" +
 		"//                   reload (R)   jump (Space)   attack2 (RMB)\n" +
 		"//                   alt1  alt2\n" +
-		"//                 Examples:  duck+speed   duck+zoom   speed+attack2\n" +
+		"//                 Examples:  speed+use   duck+zoom   speed+attack2\n" +
 		"// hold_time       0.0 to 3.0. Seconds the chord must be held before\n" +
-		"//                 it fires. Default 0.45, so ordinary crouch-walking\n" +
-		"//                 does not trigger it. Lower it for a snappier feel.\n" +
+		"//                 it fires. Default 0.30, so simply using E on a door\n" +
+		"//                 while running never triggers it. Lower for snappier.\n" +
 		"// chat_command    Chat text that inspects. Default !ammo.\n" +
 		"//                 Always active, cannot conflict with any bind.\n" +
 		"//\n" +
@@ -260,6 +264,12 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//                 slip a real reload through.\n" +
 		"// output_chat     0 or 1. Ammo line in the chat area. Default 1.\n" +
 		"// output_center   0 or 1. Ammo line at screen center. Default 1.\n" +
+		"// anim_source     auto | deploy | idle | reload. Default auto.\n" +
+		"//                 Which animation to play when the model has no\n" +
+		"//                 dedicated inspect sequence. Most inspect weapon\n" +
+		"//                 mods put their animation on the DEPLOY/draw anim,\n" +
+		"//                 which auto tries first. Use 'reload' to force the\n" +
+		"//                 old behaviour, or 'idle' for mods that use idle.\n" +
 		"// play_animation  0 or 1. Drive the weapon's reload/inspect animation.\n" +
 		"//                 Custom weapon models that ship an inspect animation\n" +
 		"//                 will show it. Stock models show their reload. Default 1.\n" +
@@ -280,8 +290,8 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"// ============================================================\n" +
 		"enable 1\n" +
 		"trigger combo\n" +
-		"combo duck+speed\n" +
-		"hold_time 0.45\n" +
+		"combo speed+use\n" +
+		"hold_time 0.30\n" +
 		"chat_command !ammo\n" +
 		"key alt1\n" +
 		"modifier none\n" +
@@ -289,6 +299,7 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"output_chat 1\n" +
 		"output_center 1\n" +
 		"play_animation 1\n" +
+		"anim_source auto\n" +
 		"block_reload 1\n" +
 
 		"spoof_time 2.50\n" +
@@ -526,8 +537,31 @@ EBFInspectAmmo.FormatAmmo <- function (info)
 // which is exactly the animation a full magazine R press shows on the custom
 // weapon models this feature is meant for.
 //-----------------------------------------------------------------------------
+// Sequence names to try, in priority order.
+//
+// Most L4D2 "inspect" weapon mods do NOT ship a sequence literally called
+// "inspect". They hang the animation off one of:
+//   * a dedicated inspect sequence, if the author added one
+//   * the DEPLOY / draw animation (very common: the gun is raised and looked
+//     over, which is exactly the inspect motion)
+//   * an extended IDLE variant that plays on a full magazine
+//
+// Trying only "inspect" and then falling straight through to the reload
+// sequence is what made stock reload animations play instead of the mod's
+// inspect animation, which was the reported symptom.
 EBFInspectAmmo.InspectSeqNames <- [
-	"inspect", "ACT_VM_INSPECT", "idle_inspect", "inspect_start", "lookat01"
+	"inspect", "ACT_VM_INSPECT", "idle_inspect", "inspect_start",
+	"inspect_empty", "lookat", "lookat01", "ACT_VM_FIDGET", "fidget"
+];
+
+// Deploy/draw sequences: where a great many inspect animations actually live.
+EBFInspectAmmo.DeploySeqNames <- [
+	"ACT_VM_DRAW", "draw", "deploy", "ACT_VM_DEPLOY", "ACT_VM_DRAW_EMPTY"
+];
+
+// Idle variants, which some mods use for the full-magazine inspect.
+EBFInspectAmmo.IdleSeqNames <- [
+	"ACT_VM_IDLE", "idle"
 ];
 
 EBFInspectAmmo.ReloadSeqNames <- [
@@ -571,7 +605,16 @@ EBFInspectAmmo.PlayInspectAnim <- function (player, weapon, verbose)
 		return false;
 	}
 
+	// Priority: real inspect > deploy (where most mods put it) > configured
+	// preference > reload as the last resort.
 	local pick = FindSequence(vm, InspectSeqNames);
+
+	if (pick == null && Settings.anim_source != "reload")
+		pick = FindSequence(vm, DeploySeqNames);
+
+	if (pick == null && Settings.anim_source == "idle")
+		pick = FindSequence(vm, IdleSeqNames);
+
 	if (pick == null)
 		pick = FindSequence(vm, ReloadSeqNames);
 
@@ -632,12 +675,8 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 		return false;
 	}
 
-	// If this weapon's clip is currently spoofed full, report the real count.
-	local realClip = null;
-	if (state.spoofActive && state.spoofWeapon == weapon)
-		realClip = state.spoofRealClip;
-
-	local info = ReadAmmo(player, weapon, realClip);
+	// Ammo is never modified any more, so m_iClip1 is always the truth.
+	local info = ReadAmmo(player, weapon);
 
 	if (!info.hasClip && !Settings.melee_ok)
 	{
@@ -645,12 +684,14 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 		return false;
 	}
 
-	// Spoof the magazine full for the duration of the animation so the engine
-	// refuses to start a reload, then release it automatically.
+	// Open the "inspect window". For its duration any reload the engine tries
+	// to start is cancelled on the spot. No ammo value is ever written.
 	if (Settings.block_reload && info.hasClip)
 	{
-		SetClipSpoofed(player, state, true);
+		state.spoofActive = true;
+		state.spoofWeapon = weapon;
 		state.spoofUntil = Time() + Settings.spoof_time;
+		CancelReload(player, weapon, Settings.spoof_time);
 	}
 
 	PlayInspectAnim(player, weapon, verbose);
@@ -681,10 +722,8 @@ EBFInspectAmmo.GetState <- function (idx)
 			lastButtons = 0
 			lastInspect = 0.0
 			spoofActive = false
-			spoofWeapon = null
-			spoofRealClip = -1
-			spoofFakeClip = -1
 			spoofUntil = 0.0
+			spoofWeapon = null
 			comboStart = 0.0
 			comboFired = false
 		};
@@ -767,157 +806,206 @@ EBFInspectAmmo.ModifierBit <- function ()
 	return 0;
 }
 
-// Releases a time-limited spoof once its deadline passes.
+// Reload prevention -- WITHOUT touching ammo.
 //
-// The spoof lifetime is driven by a timer, NOT by how long a key is held.
-// That is the fix for the E+R timing complaints: tapping the key and holding
-// it now behave identically, and letting go early can no longer expose a
-// partially empty magazine to the engine mid-animation.
+// HISTORY (v1.2-v1.4): the previous approach temporarily wrote
+// m_iClip1 = GetMaxClip1() so CTerrorGun::Reload() would bail out on a "full"
+// magazine. That was fundamentally unsafe: while the spoof was pinned, any
+// shot the player fired was immediately written back to the fake full value,
+// producing INFINITE AMMO, and any mismatch on restore left the magazine
+// genuinely full. Writing to m_iClip1 at all is too dangerous.
+//
+// v1.5.0 never writes m_iClip1, m_iAmmo, or any ammo field. Instead it lets
+// the engine start the reload, then cancels it on the same frame and holds the
+// weapon in a non-reloading state for the duration of the animation:
+//
+//   m_bInReload         -> 0    cancels the reload in progress
+//   m_reloadState etc.  -> 0    shotguns track shell-by-shell reloads
+//   m_flNextPrimaryAttack       pushed forward so the weapon stays busy
+//   m_flTimeWeaponIdle          pushed forward so it will not re-idle early
+//
+// Ammo therefore cannot change: no reload ever completes, and nothing writes
+// to the clip. The worst possible failure is a reload that visibly starts and
+// is cut short, never lost or duplicated ammo.
+EBFInspectAmmo.CancelReload <- function (player, weapon, extend)
+{
+	if (weapon == null || !weapon.IsValid())
+		return;
+
+	try
+	{
+		if (NetProps.HasProp(weapon, "m_bInReload")
+			&& NetProps.GetPropInt(weapon, "m_bInReload") != 0)
+		{
+			NetProps.SetPropInt(weapon, "m_bInReload", 0);
+			Dbg("cancelled a reload on " + weapon.GetClassname());
+		}
+
+		// Shotguns reload one shell at a time and keep their own state.
+		foreach (prop in ["m_reloadState", "m_reloadAnimState",
+		                  "m_reloadNumShells", "m_shellsInserted"])
+		{
+			if (NetProps.HasProp(weapon, prop)
+				&& NetProps.GetPropInt(weapon, prop) != 0)
+			{
+				NetProps.SetPropInt(weapon, prop, 0);
+			}
+		}
+
+		// Keep the weapon "busy" so it does not immediately restart a reload
+		// while the inspect animation is still playing.
+		if (extend > 0.0)
+		{
+			local until = Time() + extend;
+			foreach (prop in ["m_flNextPrimaryAttack", "m_flTimeWeaponIdle"])
+			{
+				if (NetProps.HasProp(weapon, prop)
+					&& NetProps.GetPropFloat(weapon, prop) < until)
+				{
+					NetProps.SetPropFloat(weapon, prop, until);
+				}
+			}
+		}
+	}
+	catch (e) { Dbg("CancelReload error: " + e); }
+}
+
+// Runs every frame while an inspect is in progress, suppressing any reload the
+// engine tries to begin until the animation window expires.
 EBFInspectAmmo.UpdateSpoof <- function (player, state)
 {
 	if (!state.spoofActive)
 		return;
 
-	if (state.spoofUntil > 0.0 && Time() >= state.spoofUntil)
+	if (Time() >= state.spoofUntil)
 	{
-		SetClipSpoofed(player, state, false);
+		state.spoofActive = false;
 		state.spoofUntil = 0.0;
+		state.spoofWeapon = null;
+		Dbg("inspect window closed for " + player.GetPlayerName());
 		return;
 	}
 
-	// Keep it pinned while it is meant to be active.
-	SetClipSpoofed(player, state, true);
+	local w = state.spoofWeapon;
+
+	// Weapon swapped mid-inspect: stop guarding the old one.
+	local cur = null;
+	try { cur = player.GetActiveWeapon(); } catch (e) { }
+	if (cur != w)
+	{
+		state.spoofActive = false;
+		state.spoofUntil = 0.0;
+		state.spoofWeapon = null;
+		return;
+	}
+
+	CancelReload(player, w, 0.0);
 }
 
-// Reload prevention: the "already full" trick.
-//
-// WHY NOT m_afButtonDisabled:
-// Setting the IN_RELOAD bit there does stop the reload, but the engine strips
-// that bit from the usercmd BEFORE anything else runs
-// (player_command.cpp: ucmd->buttons &= ~m_afButtonDisabled), and m_nButtons
-// is then assigned from that already-filtered mask
-// (baseplayer_shared.cpp: m_nButtons = nUserCmdButtonMask).
-// So on the server there is no way to both suppress R and still see R. v1.1.0
-// tried exactly that and blinded itself, which is why the readout vanished and
-// the weapon stuttered.
-//
-// WHAT WE DO INSTEAD:
-// While the modifier (E) is held we temporarily report the magazine as FULL by
-// writing m_iClip1 = GetMaxClip1(). CTerrorGun::Reload() bails out when the
-// clip is already full, so pressing R does nothing but play the weapon's
-// full-magazine idle/inspect animation -- exactly the behaviour we want.
-// The real clip value is restored the instant E is released.
-//
-// The reserve pool is never touched, and because the weapon never enters a
-// reload, no ammo can move. R stays fully functional the moment E is let go.
-EBFInspectAmmo.SetClipSpoofed <- function (player, state, spoof)
-{
-	// --- turn the spoof OFF -------------------------------------------
-	if (!spoof)
-	{
-		if (!state.spoofActive)
-			return;
-
-		local w = state.spoofWeapon;
-		if (w != null && w.IsValid())
-		{
-			try
-			{
-				// Only restore if nothing else changed the clip meanwhile
-				// (e.g. the player fired). Never hand out free ammo.
-				local now = NetProps.GetPropInt(w, "m_iClip1");
-				if (now == state.spoofFakeClip)
-					NetProps.SetPropInt(w, "m_iClip1", state.spoofRealClip);
-				else
-					Dbg("clip changed during spoof, leaving it at " + now);
-			}
-			catch (e) { Dbg("un-spoof failed: " + e); }
-		}
-
-		state.spoofActive = false;
-		state.spoofWeapon = null;
-		state.spoofRealClip = -1;
-		state.spoofFakeClip = -1;
-		Dbg("clip spoof OFF for " + player.GetPlayerName());
-		return;
-	}
-
-	// --- turn the spoof ON --------------------------------------------
-	if (state.spoofActive)
-	{
-		// If the player switched weapons while holding E, restore the old one
-		// first so it is never left showing a fake magazine.
-		local cur = null;
-		try { cur = player.GetActiveWeapon(); } catch (e) { }
-		if (cur != state.spoofWeapon)
-		{
-			SetClipSpoofed(player, state, false);
-			// Fall through on the next frame with the new weapon.
-			return;
-		}
-
-		// Keep it pinned: the weapon may try to start a reload anyway.
-		local w = state.spoofWeapon;
-		if (w != null && w.IsValid())
-		{
-			try
-			{
-				if (NetProps.GetPropInt(w, "m_iClip1") < state.spoofFakeClip)
-					NetProps.SetPropInt(w, "m_iClip1", state.spoofFakeClip);
-			}
-			catch (e) { }
-		}
-		return;
-	}
-
-	local w = null;
-	try { w = player.GetActiveWeapon(); } catch (e) { return; }
-	if (w == null || !w.IsValid())
-		return;
-
-	// Only guns with a magazine make sense here.
-	local cls = w.GetClassname();
-	if (cls in NoClipWeapons)
-		return;
-
-	try
-	{
-		if (!NetProps.HasProp(w, "m_iClip1"))
-			return;
-
-		local maxClip = -1;
-		if ("GetMaxClip1" in w)
-			maxClip = w.GetMaxClip1();
-		if (maxClip == null || maxClip <= 0)
-			return;
-
-		local real = NetProps.GetPropInt(w, "m_iClip1");
-		if (real >= maxClip)
-			return;                       // already full, nothing to fake
-
-		state.spoofWeapon = w;
-		state.spoofRealClip = real;
-		state.spoofFakeClip = maxClip;
-		state.spoofActive = true;
-
-		NetProps.SetPropInt(w, "m_iClip1", maxClip);
-		Dbg("clip spoof ON for " + player.GetPlayerName()
-			+ " (" + real + " -> " + maxClip + ")");
-	}
-	catch (e)
-	{
-		Dbg("spoof failed: " + e);
-		state.spoofActive = false;
-		state.spoofWeapon = null;
-	}
-}
-
-// Always restore the true clip; used on death, weapon switch, shutdown, etc.
+// Kept for the cleanup call sites (death, disconnect, disable, reload).
+// There is nothing to restore any more, because nothing was modified.
 EBFInspectAmmo.ForceUnspoof <- function (player, state)
 {
-	if (state.spoofActive)
-		SetClipSpoofed(player, state, false);
+	state.spoofActive = false;
+	state.spoofUntil = 0.0;
+	state.spoofWeapon = null;
 }
+
+//-----------------------------------------------------------------------------
+// Player state.
+//-----------------------------------------------------------------------------
+EBFInspectAmmo.GetState <- function (idx)
+{
+	if (!(idx in State))
+	{
+		State[idx] <- {
+			lastButtons = 0
+			lastInspect = 0.0
+			spoofActive = false
+			spoofUntil = 0.0
+			spoofWeapon = null
+			comboStart = 0.0
+			comboFired = false
+		};
+	}
+	return State[idx];
+}
+
+
+// Resolves the configured trigger key to its button bit.
+// Named button bits usable in a chord spec.
+EBFInspectAmmo.ChordBits <- {
+	duck = 4
+	use = 32
+	reload = 8192
+	jump = 2
+	speed = 131072
+	zoom = 524288
+	alt1 = 16384
+	alt2 = 32768
+	attack2 = 2048
+};
+
+// Parses "duck+speed" into a combined bit mask. Cached, since it is read
+// every frame. Returns 0 if the spec is empty or unrecognised.
+EBFInspectAmmo.ComboMaskCache <- -1;
+EBFInspectAmmo.ComboMaskSrc <- "";
+
+EBFInspectAmmo.ComboMask <- function ()
+{
+	if (ComboMaskSrc == Settings.combo && ComboMaskCache >= 0)
+		return ComboMaskCache;
+
+	local mask = 0;
+	local bad = "";
+
+	foreach (part in split(Settings.combo, "+ ,"))
+	{
+		local nm = strip(part).tolower();
+		if (nm.len() == 0)
+			continue;
+
+		if (nm in ChordBits)
+			mask = mask | ChordBits[nm];
+		else
+			bad += (bad.len() ? ", " : "") + nm;
+	}
+
+	if (bad.len())
+		Warn("Unknown key(s) in combo '" + Settings.combo + "': " + bad);
+
+	ComboMaskSrc = Settings.combo;
+	ComboMaskCache = mask;
+	return mask;
+}
+
+EBFInspectAmmo.TriggerBit <- function ()
+{
+	// Legacy compatibility: require_use 1 reproduces the old E+R binding.
+	if (Settings.require_use && Settings.key == "alt1" && Settings.modifier == "none")
+		return IN_RELOAD;
+
+	if (Settings.key in KeyBits)
+		return KeyBits[Settings.key];
+
+	return IN_ALT1;
+}
+
+// Resolves the configured modifier to its button bit, 0 when none.
+EBFInspectAmmo.ModifierBit <- function ()
+{
+	if (Settings.require_use && Settings.key == "alt1" && Settings.modifier == "none")
+		return IN_USE;
+
+	switch (Settings.modifier)
+	{
+		case "use":   return IN_USE;
+		case "duck":  return IN_DUCK;
+		case "speed": return IN_SPEED;
+	}
+	return 0;
+}
+
 
 //-----------------------------------------------------------------------------
 // Think. One entity drives every player.
@@ -1199,10 +1287,11 @@ EBFInspectAmmo.Status <- function ()
 	// Clip-spoof state: this is what stops E+R from reloading.
 	local hs = GetState(host.GetEntityIndex());
 	if (hs.spoofActive)
-		Log("  clip spoof    : ACTIVE (real " + hs.spoofRealClip
-			+ ", showing " + hs.spoofFakeClip + ")");
+		Log("  inspect window: OPEN (" + (hs.spoofUntil - Time())
+			+ "s left, reloads suppressed)");
 	else
-		Log("  clip spoof    : inactive (hold E to engage)");
+		Log("  inspect window: closed");
+	Log("  ammo writes   : none - this build never modifies m_iClip1/m_iAmmo");
 	local bm = host.GetButtonMask();
 	Log("  trigger mode  : " + Settings.trigger);
 
@@ -1254,17 +1343,37 @@ EBFInspectAmmo.Status <- function ()
 
 	Log("  viewmodel     : " + vm.GetModelName());
 
-	local pick = FindSequence(vm, InspectSeqNames);
-	if (pick != null)
-		Log("  inspect anim  : '" + pick.name + "' (id " + pick.id + ")");
-	else
-		Log("  inspect anim  : none");
-
+	local ins = FindSequence(vm, InspectSeqNames);
+	local dep = FindSequence(vm, DeploySeqNames);
+	local idl = FindSequence(vm, IdleSeqNames);
 	local rel = FindSequence(vm, ReloadSeqNames);
-	if (rel != null)
-		Log("  reload anim   : '" + rel.name + "' (id " + rel.id + ")");
-	else
-		Log("  reload anim   : none  <-- nothing to show on this model");
+
+	Log("  anim_source   : " + Settings.anim_source);
+	Log("  inspect anim  : " + (ins ? "'" + ins.name + "' (id " + ins.id + ")" : "none"));
+	Log("  deploy anim   : " + (dep ? "'" + dep.name + "' (id " + dep.id + ")" : "none"));
+	Log("  idle anim     : " + (idl ? "'" + idl.name + "' (id " + idl.id + ")" : "none"));
+	Log("  reload anim   : " + (rel ? "'" + rel.name + "' (id " + rel.id + ")" : "none"));
+
+	// Dump every sequence the model actually has, so an unusual name used by
+	// a custom weapon can simply be read off and set in anim_source.
+	Log("  -- all sequences on this viewmodel --");
+	local shown = 0;
+	for (local i = 0; i < 128; i++)
+	{
+		local nm = null;
+		try { nm = vm.GetSequenceName(i); } catch (e) { break; }
+		if (nm == null || nm == "" || nm == "Unknown")
+			continue;
+		Log("     [" + i + "] " + nm);
+		shown++;
+		if (shown >= 64)
+		{
+			Log("     ... (truncated)");
+			break;
+		}
+	}
+	if (shown == 0)
+		Log("     (none readable)");
 
 	Log("========================================");
 }

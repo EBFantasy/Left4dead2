@@ -229,57 +229,75 @@ while R was held, only reloading after release.
 Lesson: suppressing an input and detecting that same input are mutually
 exclusive here.
 
-### Attempt 3 (v1.2.0) — pretend the magazine is full. WORKS.
+### Attempt 3 (v1.2.0-v1.4.0) — pretend the magazine is full. UNSAFE.
 
-Do not touch the input at all. Instead, while E is held, temporarily write:
+While the modifier was held, write `m_iClip1 = GetMaxClip1()` so
+`CTerrorGun::Reload()` bails out on a "full" clip.
+
+It did stop the reload, but writing to the clip at all turned out to be
+indefensible:
+
+- **Infinite ammo.** The spoof was re-pinned every frame (`if clip < fake then
+  clip = fake`). Any shot fired during the window was instantly written back
+  to the fake full value, so the magazine never went down. Reproduced in test:
+  10 shots fired, clip still 40.
+- **Genuinely full magazines.** Restore only fired when the clip was *exactly*
+  the fake value. Any mismatch skipped the restore and left the weapon really
+  full — reported from live play as "not a fake full mag, a real one".
+
+Lesson: never write ammo fields to change behaviour. The failure mode is
+duplication, which is far worse than the problem being solved.
+
+### Attempt 4 (v1.5.0) — cancel the reload, touch no ammo. CURRENT.
+
+`m_iClip1`, `m_iAmmo` and every other ammo field are now **never written**.
+The engine is allowed to start a reload; the script cancels it on the same
+frame and keeps the weapon out of the reload state for the inspect window:
 
 ```squirrel
-NetProps.SetPropInt(weapon, "m_iClip1", weapon.GetMaxClip1());
+m_bInReload        -> 0     // cancel the reload in progress
+m_reloadState etc. -> 0     // shotguns track shell-by-shell reloads
+m_flNextPrimaryAttack       // pushed forward: weapon stays busy
+m_flTimeWeaponIdle          // pushed forward: will not re-idle early
 ```
 
-`CTerrorGun::Reload()` bails out immediately when the clip is already full, so
-pressing R does nothing except play the weapon's full-magazine idle/inspect
-animation — precisely the animation this feature exists to trigger. The real
-clip value is restored the moment E is released.
+Because no reload ever completes and nothing writes to the clip, ammo cannot
+change in either direction. The worst possible failure is a reload animation
+that visibly starts and is cut short — never lost or duplicated ammo.
 
-Why this is sound:
+### Why Shift+E, not Ctrl+Shift
 
-- **R is never suppressed**, so edge detection keeps working normally and the
-  key stays fully usable the instant E is let go.
-- **The reserve pool is never touched.** The weapon never enters a reload, so
-  no ammo can move in either direction.
-- **The readout shows the true count**, not the spoof: `ReadAmmo()` takes a
-  `realClipOverride`, and `DoInspect()` passes the saved real value whenever a
-  spoof is active. Without this the display would always read "40/40".
+v1.4.0 defaulted to `duck+speed`. Functionally fine, ergonomically poor: it
+required crouching, so on screen the character visibly ducks before inspecting,
+which reads as a bug rather than a feature.
 
-### Attempt 4 (v1.3.0) — decouple the spoof from the key
+`speed+use` (hold Shift, press E) is comfortable for the left hand and has no
+odd visual side effect. Shift alone still sprints and E alone still uses; both
+must overlap past `hold_time` (0.30 s), which is long enough that opening a
+door while running never triggers an inspect.
 
-Even with the clip spoof, v1.2.0 tied the spoof's lifetime to "is E held?".
-Releasing the modifier mid-animation dropped the magazine back to its real
-value while the engine was still watching, so the inspect animation visibly
-turned into a reload animation partway through.
+### Finding the right animation
 
-The spoof is now driven by a **timer**, not by key state: `DoInspect()` sets
-`spoofUntil = Time() + spoof_time` (default 2.5 s) and `UpdateSpoof()` releases
-it when that deadline passes. Key state no longer matters once the inspect has
-started, which is why a single-frame tap and a long hold now behave identically.
+A separate reported bug: weapons that *do* have a full-magazine inspect
+animation still played their reload animation.
 
-The old frame-counted `RunGuard` was deleted outright. It wrote the *real* clip
-back every frame while the spoof wanted the *full* value, so the two mechanisms
-were actively fighting each other.
+Cause: the search only tried literal `inspect`-style names, then fell straight
+through to the reload sequence. But most L4D2 inspect weapon mods hang the
+animation off the **deploy/draw** sequence, since raising and looking over the
+gun already is the inspect motion.
 
-### Not leaking a fake magazine
+The priority is now: dedicated inspect names -> deploy/draw -> (optionally
+idle) -> reload as a last resort. `anim_source` (`auto`/`deploy`/`idle`/
+`reload`) overrides this, and `Status()` now dumps **every** sequence in the
+loaded viewmodel so an unusual name can simply be read off and configured.
 
-A spoofed clip must never outlive the keypress, or the player would appear to
-gain ammo. The true value is restored when E is released, on death,
-incapacitation, ledge hang, loss of survivor status, on weapon switch while E
-is still held, when the addon is disabled at runtime, and in `Reload()`.
+### Nothing to leak
 
-One deliberate refusal: if the clip value **changed** while spoofed (the
-player fired), the script does **not** force the old number back, because that
-would hand out free rounds. It logs and leaves the current value alone.
-
-Weapons with no magazine (melee, throwables, medkits) are never spoofed.
+Since v1.5.0 there is no spoofed state to restore: the script only ever clears
+`m_bInReload` and pushes timing fields forward. The inspect window closes on a
+timer, on weapon switch, on death, incapacitation, ledge hang, loss of survivor
+status, runtime disable, and in `Reload()` — but even if it somehow stayed
+open, no ammo value could be affected.
 
 ## 7. Multiplayer scope (please read before reporting a bug)
 
