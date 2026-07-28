@@ -1217,7 +1217,17 @@ function BotAI::findManualLeadDirectionalTarget(bot, owner = null, hint = null, 
 	return best;
 }
 
-function BotAI::findManualLeadTarget(bot, owner = null, badTargets = null) {
+// selfAnchored: when true the search is centred on the BOT, exactly as it is
+// when no human survivor is alive. This is what the "pathfind" (lead) command
+// wants - the user verified that bots navigate the same spots smoothly once
+// the humans are dead, but stall there while a human is alive.
+//
+// The reason is right below: with a human present the anchor becomes the
+// PLAYER, so candidate areas are gathered around the player, scored by
+// distance to the player, and rejected outright past 1700u from them. On a
+// map where the route doubles back or the player stands still, that biases the
+// bot towards areas behind it and it ends up shuffling in a dead end.
+function BotAI::findManualLeadTarget(bot, owner = null, badTargets = null, selfAnchored = false) {
 	if(!BotAI.IsEntitySurvivorBot(bot)) return null;
 
 	local botPos = bot.GetOrigin();
@@ -1226,7 +1236,7 @@ function BotAI::findManualLeadTarget(bot, owner = null, badTargets = null) {
 		return null;
 
 	local anchor = bot;
-	if(BotAI.IsPlayerEntityValid(owner) && BotAI.IsAlive(owner))
+	if(!selfAnchored && BotAI.IsPlayerEntityValid(owner) && BotAI.IsAlive(owner))
 		anchor = owner;
 
 	local anchorPos = anchor.GetOrigin();

@@ -170,7 +170,12 @@ function BotAI::moveFunc() {
 		}
 
 		local ownerForLead = BotAI.getManualLeadOwner(data);
-		if(BotAI.IsPlayerEntityValid(ownerForLead) && BotAI.distanceof(bot.GetOrigin(), ownerForLead.GetOrigin()) > 1700) {
+		// Distance leash. Scout is a short errand and should abort when it gets
+		// too far from its owner, but "pathfind" is meant to press on ahead, so
+		// leashing it to the player is precisely what made it give up and
+		// shuffle on the spot. Give lead a much longer rope.
+		local leashRange = (("mode" in data) && data.mode == "scout") ? 1700 : 4200;
+		if(BotAI.IsPlayerEntityValid(ownerForLead) && BotAI.distanceof(bot.GetOrigin(), ownerForLead.GetOrigin()) > leashRange) {
 			navigator.clearPath(id);
 			data.nextPath = now + 1.2;
 			BotAI.ManualLead[bot] <- data;
@@ -244,6 +249,47 @@ function BotAI::moveFunc() {
 			}
 		}
 
+		// Lead had no low-movement recovery at all: only scout got one, which
+		// is why scout recovers from a dead end and pathfind just loiters.
+		// Give lead an equivalent, but WITHOUT scout's teleport-to-owner reset -
+		// that would defeat the point of sending the bot ahead. Blacklist the
+		// target it failed to reach and pick a new one.
+		if(!scoutMode) {
+			if(!("leadStartTime" in data)) data.leadStartTime <- now;
+			if(!("leadStartPos" in data)) data.leadStartPos <- bot.GetOrigin();
+
+			local leadMoved = BotAI.distanceof(bot.GetOrigin(), data.leadStartPos);
+			if(now - data.leadStartTime >= 3.5 && leadMoved < 70) {
+				if(("currentTarget" in data) && BotAI.validVector(data.currentTarget))
+					BotAI.rememberManualLeadBadTarget(data, data.currentTarget);
+
+				navigator.clearPath(id);
+				BotAI.clearManualLeadCommandSet(bot, 0.8);
+
+				local leadResetPos = bot.GetOrigin();
+				data.nextPath = now + 0.2;
+				data.leadStartTime = now;
+				data.leadStartPos = leadResetPos;
+				if("stuckSince" in data) data.stuckSince = now; else data.stuckSince <- now;
+				if("lastMovePos" in data) data.lastMovePos = leadResetPos; else data.lastMovePos <- leadResetPos;
+				if("lastTargetDist" in data) delete data.lastTargetDist;
+				if("currentTarget" in data) delete data.currentTarget;
+
+				if(BotAI.BotDebugMode)
+					printl("[BotAI][ManualLead][LeadRetarget] " + BotAI.getPlayerBaseName(bot)
+						+ " stalled 3.5s, blacklisting target and re-picking");
+
+				BotAI.ManualLead[bot] <- data;
+				continue;
+			}
+
+			// Reset the stall window whenever real progress is made.
+			if(leadMoved >= 70) {
+				data.leadStartTime = now;
+				data.leadStartPos = bot.GetOrigin();
+			}
+		}
+
 		if(navigator.moving() && !manualMoving) {
 			if(locked)
 				navigator.stop(false);
@@ -291,9 +337,19 @@ function BotAI::moveFunc() {
 		local targetFromDirHint = false;
 		local autonomousLead = (("autonomousLead" in data) && data.autonomousLead);
 		local allowLeadHint = scoutMode && !autonomousLead;
+
+		// "Pathfind" (lead) should navigate the way ABA does when no human is
+		// alive: anchored on the bot itself, not tethered to the player.
+		// Scout keeps the player-anchored behaviour, which suits it.
+		local leadSelfAnchored = !scoutMode;
+
 		local baseFlow = GetFlowDistanceForPosition(bot.GetOrigin());
 		local ownerForFlow = ownerForLead;
-		if(BotAI.IsPlayerEntityValid(ownerForFlow)) {
+		// Only fold the player's flow in for scout. For lead this used to raise
+		// baseFlow to the player's position, so when the player stood ahead of
+		// the bot every area near the bot failed the "flowDelta >= 70" test and
+		// the only survivors were areas the bot could not reach cleanly.
+		if(!leadSelfAnchored && BotAI.IsPlayerEntityValid(ownerForFlow)) {
 			local ownerFlow = GetFlowDistanceForPosition(ownerForFlow.GetOrigin());
 			if(ownerFlow > baseFlow)
 				baseFlow = ownerFlow;
@@ -314,7 +370,7 @@ function BotAI::moveFunc() {
 		}
 
 		if(target == null)
-			target = BotAI.findManualLeadTarget(bot, ownerForLead, ("badTargets" in data) ? data.badTargets : null);
+			target = BotAI.findManualLeadTarget(bot, ownerForLead, ("badTargets" in data) ? data.badTargets : null, leadSelfAnchored);
 
 		if(target == null) {
 			data.nextPath = now + 1.5;
@@ -350,7 +406,7 @@ function BotAI::moveFunc() {
 				targetFromHint = false;
 				targetFromDirHint = (target != null);
 				if(target == null)
-					target = BotAI.findManualLeadTarget(bot, ownerForLead, ("badTargets" in data) ? data.badTargets : null);
+					target = BotAI.findManualLeadTarget(bot, ownerForLead, ("badTargets" in data) ? data.badTargets : null, leadSelfAnchored);
 				priority = targetFromDirHint ? 4 : (locked ? 3 : 1);
 				if(target != null)
 					pathStarted = BotAI.botRunPos(bot, target, id, priority, stopLeadPath, 1700);
