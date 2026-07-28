@@ -190,7 +190,9 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	if (!(id in ::SmoothRecoilPunch._players)) {
 		::SmoothRecoilPunch._players[id] <- {
 			shots = 0,
-			lastShot = 0.0
+			lastShot = 0.0,
+			clip = -1,
+			weapon = ""
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -290,50 +292,127 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 });
 
 //-----------------------------------------------------------------------------
-// Event hook
+// Shot detection
+//
+// v0.9.1: this used to rely on ::OnGameEvent_weapon_fire plus
+// __CollectGameEventCallbacks. Your console.log proved that never fired even
+// once - the prototype loaded ("punch-angle prototype 0.9.0-punch loaded") but
+// no shot was ever processed, which is exactly why recoil did nothing.
+//
+// Game-event callbacks registered from a mapspawn_addon-loaded script are not
+// reliably collected in this environment. The original core never used events
+// at all: it polls each survivor's m_iClip1 from a think and treats any
+// decrease as shots fired. That mechanism is already proven to work in your
+// setup, so this now uses the same approach.
 //-----------------------------------------------------------------------------
-::OnGameEvent_weapon_fire <- function (params) {
-	if (!("SmoothRecoilPunch" in getroottable())) {
-		return;
-	}
+::SmoothRecoilPunch.rawset("THINK_NAME", "SmoothRecoilPunch_Think");
+::SmoothRecoilPunch.rawset("_thinker", null);
+::SmoothRecoilPunch.rawset("_started", false);
+::SmoothRecoilPunch.rawset("_tickLogs", 0);
 
+::SmoothRecoilPunch.rawset("GetClip", function (weapon) {
 	try {
-		if (!("userid" in params)) {
-			return;
+		return NetProps.GetPropInt(weapon, "m_iClip1");
+	} catch (e) { }
+	return -1;
+});
+
+// Polls every survivor and converts clip decreases into punch.
+::SmoothRecoilPunch.rawset("Tick", function () {
+	if (!("SmoothRecoilPunch" in getroottable()))
+		return;
+
+	local player = null;
+	while (player = Entities.FindByClassname(player, "player")) {
+		if (player == null || !player.IsValid())
+			continue;
+
+		local ok = false;
+		try {
+			ok = player.IsSurvivor() && !IsPlayerABot(player);
+		} catch (e) { ok = false; }
+		if (!ok)
+			continue;
+
+		local state = ::SmoothRecoilPunch.StateOf(player);
+		if (state == null)
+			continue;
+
+		local weapon = null;
+		try { weapon = player.GetActiveWeapon(); } catch (e) { }
+
+		if (weapon == null || !weapon.IsValid()) {
+			state.clip = -1;
+			state.weapon = "";
+			continue;
 		}
 
-		local player = GetPlayerFromUserID(params.userid);
-		if (player == null || !player.IsValid()) {
-			return;
+		local wname = weapon.GetClassname();
+		local clip = ::SmoothRecoilPunch.GetClip(weapon);
+
+		// Weapon swap or unreadable clip: resync without firing recoil.
+		if (wname != state.weapon || clip < 0 || state.clip < 0) {
+			state.clip = clip;
+			state.weapon = wname;
+			continue;
 		}
 
-		// Bots do not have a view to disturb.
-		if (IsPlayerABot(player)) {
-			return;
-		}
-		if (!player.IsSurvivor()) {
-			return;
-		}
-
-		local wname = ("weapon" in params) ? params.weapon : "";
-		if (wname == "") {
-			try {
-				local w = player.GetActiveWeapon();
-				if (w != null && w.IsValid()) {
-					wname = w.GetClassname();
-				}
-			} catch (e) { }
+		if (clip < state.clip) {
+			local shots = state.clip - clip;
+			if (shots > 5)
+				shots = 5;      // guard against a resync being read as a burst
+			for (local i = 0; i < shots; i++)
+				::SmoothRecoilPunch.ApplyShot(player, wname);
 		}
 
-		::SmoothRecoilPunch.ApplyShot(player, wname);
-	} catch (e) {
-		::SmoothRecoilPunch.Dbg("weapon_fire handler error: " + e);
+		state.clip = clip;
 	}
+});
+
+// Global think entry point. AddThinkToEnt needs a name resolvable at root.
+::SmoothRecoilPunch_Think <- function () {
+	::SmoothRecoilPunch.Tick();
+	return 0.0;   // every frame
 }
 
-if ("__CollectGameEventCallbacks" in getroottable()) {
-	__CollectGameEventCallbacks(getroottable());
-}
+::SmoothRecoilPunch.rawset("StartThinker", function () {
+	if (::SmoothRecoilPunch._started
+		&& ::SmoothRecoilPunch._thinker != null
+		&& ::SmoothRecoilPunch._thinker.IsValid()) {
+		::SmoothRecoilPunch.Log("thinker already running");
+		return true;
+	}
+
+	// Clear any leftover thinker from a previous map.
+	local old = null;
+	while (old = Entities.FindByName(old, "smooth_recoil_punch_thinker")) {
+		if (old != null && old.IsValid())
+			old.Kill();
+	}
+
+	local thinker = SpawnEntityFromTable("info_target",
+		{ targetname = "smooth_recoil_punch_thinker" });
+
+	if (thinker == null || !thinker.IsValid()) {
+		::SmoothRecoilPunch.Log("ERROR: failed to spawn thinker - recoil will not run");
+		return false;
+	}
+
+	::SmoothRecoilPunch._thinker = thinker;
+	::SmoothRecoilPunch._started = true;
+	AddThinkToEnt(thinker, ::SmoothRecoilPunch.THINK_NAME);
+	::SmoothRecoilPunch.Log("thinker started (clip-poll shot detection)");
+	return true;
+});
+
+// Called by the addon entry points on every map spawn.
+::SmoothRecoilPunch.rawset("OnMapSpawn", function (source) {
+	::SmoothRecoilPunch._players.clear();
+	::SmoothRecoilPunch._started = false;
+	::SmoothRecoilPunch._thinker = null;
+	::SmoothRecoilPunch.StartThinker();
+	::SmoothRecoilPunch.Log("ready from " + source);
+});
 
 //-----------------------------------------------------------------------------
 // Diagnostics:  script SmoothRecoilPunch.Status()

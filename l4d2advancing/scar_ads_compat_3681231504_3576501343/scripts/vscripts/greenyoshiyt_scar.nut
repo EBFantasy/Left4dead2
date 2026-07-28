@@ -163,9 +163,16 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
         greenyoshiyt_scarL_mode.FoundSurvivors[greenyoshiyt].First_fired_time = 0.0
         delete greenyoshiyt_scarL_mode.ObserveQueue[greenyoshiyt]
 
-        if(greenyoshiyt_scarL_mode.Shooter.find(greenyoshiyt))
+        // array.find() returns an INDEX, and index 0 is falsy in Squirrel.
+        // Testing it as a boolean means the first entry in Shooter - which in
+        // single player is always the local player - is treated as "not
+        // present" and never removed. It then lingers until the Process-shots
+        // pass happens to clear it, which is the source of the long delay
+        // before a real right-click takes effect.
+        local shooterIdx = greenyoshiyt_scarL_mode.Shooter.find(greenyoshiyt)
+        if(shooterIdx != null)
         {
-            greenyoshiyt_scarL_mode.Shooter.remove(greenyoshiyt_scarL_mode.Shooter.find(greenyoshiyt))
+            greenyoshiyt_scarL_mode.Shooter.remove(shooterIdx)
         }
 
     }
@@ -216,7 +223,12 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
                                     local button = greenyoshiyt.GetButtonMask()
 
                                     //In shove that's not from weapon
-                                    if(button & 2048 && !(greenyoshiyt_scarL_mode.Shooter.find(greenyoshiyt)) && !(greenyoshiyt in greenyoshiyt_scarL_mode.PlayerAttack))
+                                    // Same index-0 pitfall as above: this must
+                                    // compare against null, otherwise the very
+                                    // player who is mid-burst reads as "not a
+                                    // shooter" and their real shove is handled
+                                    // on the wrong path.
+                                    if(button & 2048 && greenyoshiyt_scarL_mode.Shooter.find(greenyoshiyt) == null && !(greenyoshiyt in greenyoshiyt_scarL_mode.PlayerAttack))
                                     {
                                         DeleteShooterData(greenyoshiyt)
 
@@ -296,8 +308,13 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
             }
         }
         //Process shots
-        foreach(index, greenyoshiyt in greenyoshiyt_scarL_mode.Shooter)
+        // Iterate BACKWARDS. The body calls Shooter.remove(index) while the
+        // list is being walked; going forwards makes the following element
+        // shift into the slot just freed and be skipped for a whole tick,
+        // adding another frame of latency per queued shooter.
+        for(local index = greenyoshiyt_scarL_mode.Shooter.len() - 1; index >= 0; index--)
         {
+            local greenyoshiyt = greenyoshiyt_scarL_mode.Shooter[index]
             if(greenyoshiyt != null)
             {
                 local weapon = greenyoshiyt.GetActiveWeapon()

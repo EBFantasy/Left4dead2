@@ -33,6 +33,11 @@ if (!("SR_MODE" in getroottable()))
 			|| !("_coreReady" in ::SmoothRecoilPunch)) {
 			IncludeScript("smooth_recoil/smooth_recoil_punch");
 		}
+		// Must run on EVERY map spawn, not just the first include, or the
+		// think entity from the previous map is gone and nothing polls.
+		if ("SmoothRecoilPunch" in getroottable()) {
+			::SmoothRecoilPunch.OnMapSpawn(source);
+		}
 	}
 
 	if (::SR_MODE == "legacy" || ::SR_MODE == "both") {
