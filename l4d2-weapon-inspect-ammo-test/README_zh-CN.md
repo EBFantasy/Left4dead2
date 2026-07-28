@@ -1,11 +1,11 @@
-# [TEST] 武器检视弹药查看
+# 武器检视弹药查看
 
-当前版本：`1.7.0`。**这是一个测试性质的项目。**
+当前版本：`1.8.0`。
 
 一个独立的《求生之路 2》**VScript 插件（VPK）**。**按住 Shift 再按 E**（或在聊天栏输入 `!ammo`），即可“检视”手中的武器：
 
 - 武器播放它自己的**换弹 / 检视动作**；
-- **剩余弹药量**同时输出到聊天栏和屏幕正中；
+- **剩余弹药量**显示在屏幕正中；
 - **不会真的换弹** —— 弹匣和备用弹药都保持原样。
 
 不需要 MetaMod，不需要 SourceMod，不需要 `-insecure`。只要把一个 `.vpk` 放进
@@ -117,7 +117,7 @@ key alt1
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.7.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.8.0 ready. Hold E and tap R to inspect.
 ```
 
 诊断命令：
@@ -150,8 +150,7 @@ left4dead2\ems\ebf_inspect_ammo\settings.txt
 | `key` | alt1/alt2/zoom/reload | alt1 | 仅 trigger=key 时使用。 |
 | `modifier` | none/use/duck/speed | none | 仅 trigger=key 时的额外按键。 |
 | `require_use` | 0/1 | 0 | 旧版兼容：设为 1 可恢复 E+R（不推荐，快速点按仍可能真换弹）。 |
-| `output_chat` | 0/1 | 1 | 在聊天栏输出弹药量。 |
-| `output_center` | 0/1 | 1 | 在屏幕正中输出弹药量。 |
+| `output_center` | 0/1 | 1 | 在屏幕正中显示弹药量。设为 0 则只播放动画、不显示文字。 |
 | `play_animation` | 0/1 | 1 | 播放换弹/检视动作。 |
 | `anim_source` | auto/pickup/deploy/idle/reload | auto | 播放哪个动画。auto=有专用检视动画就用，否则用**物品拾取待机动作**（就是盯着可拾取物品时举枪端详的那个）。 |
 | `block_reload` | 0/1 | 1 | 按住 E 时把弹匣临时报告为满，使引擎拒绝换弹；松开 E 立即还原真实弹数。 |

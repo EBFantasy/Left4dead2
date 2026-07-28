@@ -1,4 +1,4 @@
-# Technical notes — [TEST] Weapon Inspect Ammo Check
+# Technical notes — Weapon Inspect Ammo Check
 
 This file records *why* the addon is built the way it is, which alternatives
 were rejected, and what to check first when something misbehaves. It is meant
@@ -11,7 +11,7 @@ to be read alongside `test_ammo_inspect/scripts/vscripts/ebf_inspect_ammo.nut`.
 Press **E (`+use`) + R (`+reload`)** while holding a weapon:
 
 1. The weapon's own **reload/inspect animation** plays on the viewmodel.
-2. The **remaining ammo** is printed to chat and to the centre of the screen.
+2. The **remaining ammo** is shown in the centre of the screen.
 3. **No reload happens.** Clip and reserve are identical before and after.
 
 Point 3 is the hard part, and most of this document is about it.
@@ -431,7 +431,8 @@ aborted reloads, sequence choices).
 Generated on first run at `left4dead2/ems/ebf_inspect_ammo/settings.txt`
 (a reference copy is in `reference/ems/`). Format: `key value`, `//` comments.
 
-`enable`, `require_use`, `output_chat`, `output_center`, `play_animation`,
+`enable`, `trigger`, `combo`, `hold_time`, `chat_command`, `output_center`,
+`play_animation`, `anim_source`,
 `block_reload`, `guard_ticks`, `cancel_window`, `cooldown`, `melee_ok`,
 `debug`.
 

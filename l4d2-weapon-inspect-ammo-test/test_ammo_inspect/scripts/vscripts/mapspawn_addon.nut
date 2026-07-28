@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 EpicBF
 //
-// [TEST] Weapon Inspect Ammo Check -- loader
+// Weapon Inspect Ammo Check -- loader
 //
 // mapspawn_addon.nut is the sanctioned auto-run entry point for VScript
 // addons. It runs once per chapter in the root table scope, and it loads

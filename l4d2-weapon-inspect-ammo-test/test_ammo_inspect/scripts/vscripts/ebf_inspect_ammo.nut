@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 EpicBF
 //
-// [TEST] Weapon Inspect Ammo Check  --  ebf_inspect_ammo.nut
+// Weapon Inspect Ammo Check  --  ebf_inspect_ammo.nut
 //
 // Hold E (+use) and tap R (+reload) to "inspect" the weapon in your hands.
 //
@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.7.0";
+EBFInspectAmmo.VERSION <- "1.8.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -78,7 +78,7 @@ EBFInspectAmmo.KeyBits <- {
 };
 
 // ClientPrint destinations.
-EBFInspectAmmo.HUD_PRINTTALK <- 3;
+// Chat output was removed in v1.8.0; only the centre-screen hint remains.
 EBFInspectAmmo.HUD_PRINTCENTER <- 4;
 
 EBFInspectAmmo.SETTINGS_PATH <- "ebf_inspect_ammo/settings.txt";
@@ -114,7 +114,6 @@ EBFInspectAmmo.Settings <- {
 	key = "alt1"          // Trigger key when trigger = key.
 	modifier = "none"     // Extra key to hold: none | use | duck | speed.
 	require_use = 0       // Legacy: 1 forces the old E+R behaviour.
-	output_chat = 1       // Print the ammo line to the chat area.
 	output_center = 1     // Print the ammo line at screen center.
 	play_animation = 1    // Drive the weapon's reload/inspect animation.
 	anim_source = "auto"  // auto | deploy | idle | reload. Which animation to
@@ -130,7 +129,6 @@ EBFInspectAmmo.Settings <- {
 EBFInspectAmmo.Bounds <- {
 	enable = [0, 1]
 	require_use = [0, 1]
-	output_chat = [0, 1]
 	output_center = [0, 1]
 	play_animation = [0, 1]
 	block_reload = [0, 1]
@@ -236,7 +234,7 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 	// NOTE: the value must start on the same line as 'return'. Squirrel ends a
 	// statement at the newline, so 'return' alone on a line returns null.
 	return "// ============================================================\n" +
-		"// [TEST] Weapon Inspect Ammo Check " + VERSION + "\n" +
+		"// Weapon Inspect Ammo Check " + VERSION + "\n" +
 		"// File: left4dead2/ems/ebf_inspect_ammo/settings.txt\n" +
 		"//\n" +
 		"// Syntax: one \"key value\" pair per line. // starts a comment.\n" +
@@ -280,7 +278,6 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//                 overrides key/modifier. Default 0. Not recommended:\n" +
 		"//                 R has to serve two purposes, so quick taps can still\n" +
 		"//                 slip a real reload through.\n" +
-		"// output_chat     0 or 1. Ammo line in the chat area. Default 1.\n" +
 		"// output_center   0 or 1. Ammo line at screen center. Default 1.\n" +
 		"// anim_source     auto | pickup | deploy | idle | reload.\n" +
 		"//                 Default auto. Which animation the inspect plays.\n" +
@@ -325,7 +322,6 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"key alt1\n" +
 		"modifier none\n" +
 		"require_use 0\n" +
-		"output_chat 1\n" +
 		"output_center 1\n" +
 		"play_animation 1\n" +
 		"anim_source auto\n" +
@@ -790,9 +786,7 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 
 	local text = FormatAmmo(info);
 
-	if (Settings.output_chat)
-		ClientPrint(player, HUD_PRINTTALK, "\x04[Inspect]\x01 " + text);
-
+	// Centre-screen is now the only readout.
 	if (Settings.output_center)
 		ClientPrint(player, HUD_PRINTCENTER, text);
 
@@ -1417,7 +1411,6 @@ EBFInspectAmmo.Reload <- function ()
 	StartManager();
 	Log("Reloaded. enable=" + Settings.enable
 		+ " require_use=" + Settings.require_use
-		+ " chat=" + Settings.output_chat
 		+ " center=" + Settings.output_center
 		+ " anim=" + Settings.play_animation
 		+ " block_reload=" + Settings.block_reload

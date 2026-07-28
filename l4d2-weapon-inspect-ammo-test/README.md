@@ -1,11 +1,11 @@
-# [TEST] Weapon Inspect Ammo Check
+# Weapon Inspect Ammo Check
 
-Current version: `1.7.0`. **This is a test project.**
+Current version: `1.8.0`.
 
 A standalone Left 4 Dead 2 **VScript addon**. Hold **Shift** and press **E** (or type `!ammo` in chat) to "inspect" the weapon in your hands:
 
 - the weapon plays its own **reload / inspect animation**,
-- the **remaining ammo** is printed to chat and to the centre of the screen,
+- the **remaining ammo** is shown in the centre of the screen,
 - **no reload happens** — clip and reserve ammo are unchanged.
 
 No MetaMod, no SourceMod, no `-insecure`. Just one `.vpk` in your addons
@@ -122,7 +122,7 @@ Open the developer console. On load you should see:
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.7.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.8.0 ready. Hold E and tap R to inspect.
 ```
 
 Diagnostic commands:
@@ -155,8 +155,7 @@ A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
 | `key` | alt1/alt2/zoom/reload | alt1 | Only used when trigger = key. |
 | `modifier` | none/use/duck/speed | none | Only used when trigger = key. |
 | `require_use` | 0/1 | 0 | Legacy: 1 restores E+R. Not recommended. |
-| `output_chat` | 0/1 | 1 | Print ammo to the chat area. |
-| `output_center` | 0/1 | 1 | Print ammo at screen centre. |
+| `output_center` | 0/1 | 1 | Show ammo at screen centre. Set 0 to play only the animation. |
 | `play_animation` | 0/1 | 1 | Drive the reload/inspect animation. |
 | `anim_source` | auto/pickup/deploy/idle/reload | auto | Which animation plays. auto = a real inspect/fidget anim if present, else the **item-pickup** idle (the one shown while staring at a pickupable item). |
 | `block_reload` | 0/1 | 1 | While E is held, report the magazine as full so the engine refuses to reload. True ammo is restored on release. |

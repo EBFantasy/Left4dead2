@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.7.0
+// Weapon Inspect Ammo Check 1.8.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -43,7 +43,6 @@
 //                 overrides key/modifier. Default 0. Not recommended:
 //                 R has to serve two purposes, so quick taps can still
 //                 slip a real reload through.
-// output_chat     0 or 1. Ammo line in the chat area. Default 1.
 // output_center   0 or 1. Ammo line at screen center. Default 1.
 // anim_source     auto | pickup | deploy | idle | reload.
 //                 Default auto. Which animation the inspect plays.
@@ -87,7 +86,6 @@ chat_command !ammo
 key alt1
 modifier none
 require_use 0
-output_chat 1
 output_center 1
 play_animation 1
 anim_source auto
