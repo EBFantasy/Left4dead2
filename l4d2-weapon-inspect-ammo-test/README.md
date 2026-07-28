@@ -1,6 +1,6 @@
 # [TEST] Weapon Inspect Ammo Check
 
-Current version: `1.6.0`. **This is a test project.**
+Current version: `1.7.0`. **This is a test project.**
 
 A standalone Left 4 Dead 2 **VScript addon**. Hold **Shift** and press **E** (or type `!ammo` in chat) to "inspect" the weapon in your hands:
 
@@ -84,6 +84,10 @@ already uses it, merge the contents rather than overwriting.
 
 In game, **hold Shift and press E** (about 0.3 s).
 
+The inspect can be **interrupted at any time**: pressing R reloads immediately
+(single press), and firing or shoving cancels it at once. The weapon is handed
+straight back.
+
 Or type in chat:
 
 ```text
@@ -118,7 +122,7 @@ Open the developer console. On load you should see:
 ```text
 [InspectAmmo] Loaded N setting(s) from ems/ebf_inspect_ammo/settings.txt
 [InspectAmmo] Manager entity active (index NN).
-[InspectAmmo] Version 1.6.0 ready. Hold E and tap R to inspect.
+[InspectAmmo] Version 1.7.0 ready. Hold E and tap R to inspect.
 ```
 
 Diagnostic commands:
@@ -157,6 +161,7 @@ A reference copy is included at `reference/ems/ebf_inspect_ammo/settings.txt`.
 | `anim_source` | auto/pickup/deploy/idle/reload | auto | Which animation plays. auto = a real inspect/fidget anim if present, else the **item-pickup** idle (the one shown while staring at a pickupable item). |
 | `block_reload` | 0/1 | 1 | While E is held, report the magazine as full so the engine refuses to reload. True ammo is restored on release. |
 | `spoof_time` | 0.5–10.0 | 2.50 | Seconds the magazine is reported full after each inspect, covering the animation. |
+| `cancel_grace` | 0.0–2.0 | 0.35 | Grace period, only when R is itself a trigger key. Fire/shove always cancel instantly. |
 | `cooldown` | 0.0–10.0 | 1.20 | Seconds between inspects. |
 | `melee_ok` | 0/1 | 1 | Allow inspecting melee / clipless items. |
 | `debug` | 0/1 | 0 | Verbose console diagnostics. |

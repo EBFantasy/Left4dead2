@@ -332,6 +332,37 @@ It makes the survivor move *slowly and quietly*. L4D2 has no vanilla sprint,
 so earlier comments calling `IN_SPEED` "sprint" were wrong. The engine name is
 "speed key"; the in-game effect is walking.
 
+### Interrupting an inspect
+
+Reported against v1.6.0: reloading during an inspect played a reload animation
+that did nothing, and a *second* press was needed for the real reload. Shoving
+did not help; only switching weapons cleared it.
+
+Cause: opening the inspect window called
+`CancelReload(player, weapon, spoof_time)`, which pushed **both**
+`m_flNextPrimaryAttack` and `m_flTimeWeaponIdle` a full 2.5 s into the future
+in one go. The weapon therefore stayed "busy" long after the player had asked
+to reload — the animation played but the reload was rejected, and only once
+that timestamp expired did a press take effect.
+
+Three changes:
+
+1. **Never push `m_flNextPrimaryAttack` for the window.** Only
+   `m_flTimeWeaponIdle` is held off, by a short rolling 0.2 s re-applied each
+   frame rather than one long lock. Firing is never blocked by this addon.
+2. **Player actions end the inspect immediately.** Fire and shove cancel with
+   no grace period, since neither can be part of a trigger chord. Reload
+   cancels instantly too, unless R *is* the configured trigger — in which case
+   `cancel_grace` (0.35 s) stops the chord from cancelling the inspect it just
+   started.
+3. **`EndInspect()` hands the weapon back properly.** It pulls
+   `m_flTimeWeaponIdle` and `m_flNextPrimaryAttack` back to "now" if this
+   addon had pushed them forward, so the very next reload press is honoured.
+   Leaving the idle timer in the future was what made the first press vanish.
+
+Ammo safety is unchanged: no ammo field is ever written, so a cancelled or
+interrupted inspect still cannot gain or lose a round.
+
 ### Nothing to leak### Nothing to leak
 
 Since v1.5.0 there is no spoofed state to restore: the script only ever clears

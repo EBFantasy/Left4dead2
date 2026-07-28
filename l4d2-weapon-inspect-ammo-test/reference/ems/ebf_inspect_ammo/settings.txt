@@ -1,5 +1,5 @@
 // ============================================================
-// [TEST] Weapon Inspect Ammo Check 1.6.0
+// [TEST] Weapon Inspect Ammo Check 1.7.0
 // File: left4dead2/ems/ebf_inspect_ammo/settings.txt
 //
 // Syntax: one "key value" pair per line. // starts a comment.
@@ -64,6 +64,12 @@
 //                 The true ammo count is restored when E is released,
 //                 and is what the readout always shows.
 //                 Requires require_use 1.
+// cancel_grace    0.0 to 2.0. Default 0.35. Only applies when R is
+//                 itself part of the trigger, stopping the chord from
+//                 cancelling the inspect it just started.
+//                 Fire and shove always cancel instantly, and so does
+//                 R when it is not a trigger key. Cancelling reloads
+//                 normally straight away - no double press needed.
 // spoof_time      0.5 to 10.0. Seconds the magazine is reported full
 //                 after each inspect, covering the animation so no
 //                 reload can start. Default 2.50. Raise it if a long
@@ -87,6 +93,7 @@ play_animation 1
 anim_source auto
 block_reload 1
 spoof_time 2.50
+cancel_grace 0.35
 cooldown 1.20
 melee_ok 1
 debug 0

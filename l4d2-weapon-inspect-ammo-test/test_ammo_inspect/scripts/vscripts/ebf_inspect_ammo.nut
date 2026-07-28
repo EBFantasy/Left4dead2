@@ -33,7 +33,7 @@ else
 
 ::EBFInspectAmmo <- {};
 
-EBFInspectAmmo.VERSION <- "1.6.0";
+EBFInspectAmmo.VERSION <- "1.7.0";
 EBFInspectAmmo.TAG <- "[InspectAmmo]";
 EBFInspectAmmo.Loaded <- false;
 EBFInspectAmmo.Manager <- null;
@@ -42,6 +42,8 @@ EBFInspectAmmo.State <- {};
 //-----------------------------------------------------------------------------
 // Button bits, per CTerrorPlayer::GetButtonMask() documentation.
 //-----------------------------------------------------------------------------
+EBFInspectAmmo.IN_ATTACK <- 1;
+EBFInspectAmmo.IN_ATTACK2 <- 2048;
 EBFInspectAmmo.IN_USE <- 32;
 EBFInspectAmmo.IN_RELOAD <- 8192;
 
@@ -118,7 +120,8 @@ EBFInspectAmmo.Settings <- {
 	anim_source = "auto"  // auto | deploy | idle | reload. Which animation to
 	                      // auto | pickup | deploy | idle | reload.
 	block_reload = 1      // Report a full magazine while E is held.
-	spoof_time = 2.50     // Seconds the magazine is held "full" per inspect.
+	spoof_time = 2.50     // Max seconds an inspect suppresses reloads for.
+	cancel_grace = 0.35   // Grace before R cancels, only if R is a trigger key.
 	cooldown = 1.20       // Seconds between inspects, per player.
 	melee_ok = 1          // Allow inspecting melee / clipless items.
 	debug = 0             // Verbose console diagnostics.
@@ -132,6 +135,7 @@ EBFInspectAmmo.Bounds <- {
 	play_animation = [0, 1]
 	block_reload = [0, 1]
 	spoof_time = [0.5, 10.0]
+	cancel_grace = [0.0, 2.0]
 	hold_time = [0.0, 3.0]
 	cooldown = [0.0, 10.0]
 	melee_ok = [0, 1]
@@ -150,7 +154,7 @@ EBFInspectAmmo.StringKeys <- {
 EBFInspectAmmo.FreeStringKeys <- { combo = 1, chat_command = 1 };
 
 // Keys that stay floats; everything else is coerced to int.
-EBFInspectAmmo.FloatKeys <- { cooldown = 1, spoof_time = 1, hold_time = 1 };
+EBFInspectAmmo.FloatKeys <- { cooldown = 1, spoof_time = 1, hold_time = 1, cancel_grace = 1 };
 
 // Pristine copy of the defaults, so a reload reverts any key that was removed
 // from the settings file instead of silently keeping the previous value.
@@ -298,6 +302,12 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"//                 and is what the readout always shows.\n" +
 		"//                 Requires require_use 1.\n" +
 
+		"// cancel_grace    0.0 to 2.0. Default 0.35. Only applies when R is\n" +
+		"//                 itself part of the trigger, stopping the chord from\n" +
+		"//                 cancelling the inspect it just started.\n" +
+		"//                 Fire and shove always cancel instantly, and so does\n" +
+		"//                 R when it is not a trigger key. Cancelling reloads\n" +
+		"//                 normally straight away - no double press needed.\n" +
 		"// spoof_time      0.5 to 10.0. Seconds the magazine is reported full\n" +
 		"//                 after each inspect, covering the animation so no\n" +
 		"//                 reload can start. Default 2.50. Raise it if a long\n" +
@@ -322,6 +332,7 @@ EBFInspectAmmo.DefaultSettingsText <- function ()
 		"block_reload 1\n" +
 
 		"spoof_time 2.50\n" +
+		"cancel_grace 0.35\n" +
 		"cooldown 1.20\n" +
 		"melee_ok 1\n" +
 		"debug 0\n";
@@ -771,7 +782,8 @@ EBFInspectAmmo.DoInspect <- function (player, state, verbose)
 		state.spoofActive = true;
 		state.spoofWeapon = weapon;
 		state.spoofUntil = Time() + Settings.spoof_time;
-		CancelReload(player, weapon, Settings.spoof_time);
+		state.inspectStart = Time();
+		CancelReload(player, weapon, 0.20);
 	}
 
 	PlayInspectAnim(player, weapon, verbose);
@@ -804,6 +816,7 @@ EBFInspectAmmo.GetState <- function (idx)
 			spoofActive = false
 			spoofUntil = 0.0
 			spoofWeapon = null
+			inspectStart = 0.0
 			comboStart = 0.0
 			comboFired = false
 		};
@@ -932,18 +945,22 @@ EBFInspectAmmo.CancelReload <- function (player, weapon, extend)
 			}
 		}
 
-		// Keep the weapon "busy" so it does not immediately restart a reload
-		// while the inspect animation is still playing.
+		// Hold off the weapon's own idle logic so it does not restart a reload
+		// by itself while the inspect animation plays.
+		//
+		// IMPORTANT: only m_flTimeWeaponIdle is touched, and only by a short
+		// rolling amount. v1.6.0 pushed m_flNextPrimaryAttack forward by the
+		// whole spoof_time (2.5s) in one go, which left the weapon "busy" long
+		// after the player had asked to reload: the reload animation played but
+		// was rejected, so a second press was needed. Never block firing, and
+		// never lock the weapon for longer than the current frame needs.
 		if (extend > 0.0)
 		{
 			local until = Time() + extend;
-			foreach (prop in ["m_flNextPrimaryAttack", "m_flTimeWeaponIdle"])
+			if (NetProps.HasProp(weapon, "m_flTimeWeaponIdle")
+				&& NetProps.GetPropFloat(weapon, "m_flTimeWeaponIdle") < until)
 			{
-				if (NetProps.HasProp(weapon, prop)
-					&& NetProps.GetPropFloat(weapon, prop) < until)
-				{
-					NetProps.SetPropFloat(weapon, prop, until);
-				}
+				NetProps.SetPropFloat(weapon, "m_flTimeWeaponIdle", until);
 			}
 		}
 	}
@@ -952,6 +969,44 @@ EBFInspectAmmo.CancelReload <- function (player, weapon, extend)
 
 // Runs every frame while an inspect is in progress, suppressing any reload the
 // engine tries to begin until the animation window expires.
+// Closes the inspect window and returns the weapon to a fully usable state.
+//
+// Clearing the idle timer matters: if it is left in the future the weapon
+// stays "busy" and the next reload press is silently dropped, which is exactly
+// the double-press problem reported against v1.6.0.
+EBFInspectAmmo.EndInspect <- function (player, state, weapon, why)
+{
+	state.spoofActive = false;
+	state.spoofUntil = 0.0;
+	state.spoofWeapon = null;
+	state.inspectStart = 0.0;
+
+	if (weapon != null && weapon.IsValid())
+	{
+		try
+		{
+			local now = Time();
+
+			// Let the weapon idle (and therefore reload) again right now.
+			if (NetProps.HasProp(weapon, "m_flTimeWeaponIdle")
+				&& NetProps.GetPropFloat(weapon, "m_flTimeWeaponIdle") > now)
+			{
+				NetProps.SetPropFloat(weapon, "m_flTimeWeaponIdle", now);
+			}
+
+			// Never leave firing blocked by us.
+			if (NetProps.HasProp(weapon, "m_flNextPrimaryAttack")
+				&& NetProps.GetPropFloat(weapon, "m_flNextPrimaryAttack") > now)
+			{
+				NetProps.SetPropFloat(weapon, "m_flNextPrimaryAttack", now);
+			}
+		}
+		catch (e) { Dbg("EndInspect error: " + e); }
+	}
+
+	Dbg("inspect ended (" + why + ") for " + player.GetPlayerName());
+}
+
 EBFInspectAmmo.UpdateSpoof <- function (player, state)
 {
 	if (!state.spoofActive)
@@ -959,10 +1014,7 @@ EBFInspectAmmo.UpdateSpoof <- function (player, state)
 
 	if (Time() >= state.spoofUntil)
 	{
-		state.spoofActive = false;
-		state.spoofUntil = 0.0;
-		state.spoofWeapon = null;
-		Dbg("inspect window closed for " + player.GetPlayerName());
+		EndInspect(player, state, state.spoofWeapon, "window expired");
 		return;
 	}
 
@@ -973,10 +1025,45 @@ EBFInspectAmmo.UpdateSpoof <- function (player, state)
 	try { cur = player.GetActiveWeapon(); } catch (e) { }
 	if (cur != w)
 	{
-		state.spoofActive = false;
-		state.spoofUntil = 0.0;
-		state.spoofWeapon = null;
+		EndInspect(player, state, w, "weapon switched");
 		return;
+	}
+
+	// --- Player-initiated cancel ------------------------------------------
+	// Any deliberate action ends the inspect immediately and hands the weapon
+	// straight back. Without this the window ran for its full spoof_time and
+	// swallowed the player's first reload press: the animation played but the
+	// reload was rejected, so a second press was needed.
+	//
+	// A short grace period stops the trigger chord itself (Shift is still
+	// held, E may still be down) from cancelling the inspect on frame one.
+	local buttons = 0;
+	try { buttons = player.GetButtonMask(); } catch (e) { }
+
+	// Fire and shove are never part of a trigger chord, so they may cancel
+	// immediately - no grace period needed.
+	if (buttons & (IN_ATTACK | IN_ATTACK2))
+	{
+		EndInspect(player, state, w, "player cancelled (fire/shove)");
+		return;
+	}
+
+	// Reload only needs a grace period when R is itself part of the trigger,
+	// otherwise the chord that started the inspect would cancel it instantly.
+	local reloadIsTrigger = false;
+	if (Settings.trigger == "combo")
+		reloadIsTrigger = (ComboMask() & IN_RELOAD) != 0;
+	else if (Settings.trigger == "key")
+		reloadIsTrigger = (TriggerBit() == IN_RELOAD);
+
+	if (buttons & IN_RELOAD)
+	{
+		if (!reloadIsTrigger
+			|| (Time() - state.inspectStart) >= Settings.cancel_grace)
+		{
+			EndInspect(player, state, w, "player cancelled (reload)");
+			return;
+		}
 	}
 
 	CancelReload(player, w, 0.0);
@@ -1004,6 +1091,7 @@ EBFInspectAmmo.GetState <- function (idx)
 			spoofActive = false
 			spoofUntil = 0.0
 			spoofWeapon = null
+			inspectStart = 0.0
 			comboStart = 0.0
 			comboFired = false
 		};
