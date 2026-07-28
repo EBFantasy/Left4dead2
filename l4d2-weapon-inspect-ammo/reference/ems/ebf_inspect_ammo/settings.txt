@@ -1,0 +1,97 @@
+// ============================================================
+// Weapon Inspect Ammo Check 1.8.0
+// File: left4dead2/ems/ebf_inspect_ammo/settings.txt
+//
+// Syntax: one "key value" pair per line. // starts a comment.
+// After editing, change level or run in the console:
+//     script EBFInspectAmmo.Reload()
+//
+// enable          0 or 1. Master switch. Default 1.
+//
+// trigger         How to inspect: combo | key | chat. Default combo.
+//                 combo - hold a chord of keys you already own.
+//                         Needs NO bind and takes no bindable key
+//                         away from your other script mods.
+//                 key   - a single trigger key (see 'key' below).
+//                 chat  - chat command only.
+//                 The chat command below ALWAYS works as well.
+// combo           Chord for trigger=combo. Default speed+use,
+//                 i.e. hold Shift and press E.
+//                 Valid names, join with +:
+//                   duck (Ctrl)   speed (Shift, walks slowly)
+//                   use (E)       zoom          jump (Space)
+//                   reload (R)   jump (Space)   attack2 (RMB)
+//                   alt1  alt2
+//                 Examples:  speed+use   duck+zoom   speed+attack2
+// hold_time       0.0 to 3.0. Seconds the chord must be held before
+//                 it fires. Default 0.30, so simply using E on a door
+//                 while running never triggers it. Lower for snappier.
+// chat_command    Chat text that inspects. Default !ammo.
+//                 Always active, cannot conflict with any bind.
+//
+// key             Used when trigger = key: alt1 | alt2 | zoom | reload.
+//                 Default alt1. alt1/alt2 are UNBOUND in vanilla L4D2,
+//                 so they clash with nothing. Bind one in the console:
+//                     bind v "+alt1"
+//                 Then just tap V to inspect. Put the bind line in
+//                 left4dead2/cfg/autoexec.cfg to make it permanent.
+// modifier        Extra key to hold: none | use | duck | speed.
+//                 Default none. Only needed if your chosen key is
+//                 already used for something else.
+//                 use = E, duck = Ctrl, speed = Shift (walk).
+// require_use     Legacy switch. 1 restores the old E+R binding and
+//                 overrides key/modifier. Default 0. Not recommended:
+//                 R has to serve two purposes, so quick taps can still
+//                 slip a real reload through.
+// output_center   0 or 1. Ammo line at screen center. Default 1.
+// anim_source     auto | pickup | deploy | idle | reload.
+//                 Default auto. Which animation the inspect plays.
+//                 auto   - a real inspect/fidget anim if the model
+//                          has one, otherwise the ITEM PICKUP anim.
+//                 pickup - force the item-pickup animation. This is
+//                          the one you see when staring at a
+//                          pickupable item, and is where most weapon
+//                          mods put their inspect animation.
+//                 deploy - the draw/pull-out animation (different!).
+//                 idle   - plain idle.
+//                 reload - force the reload animation.
+// play_animation  0 or 1. Drive the weapon's reload/inspect animation.
+//                 Custom weapon models that ship an inspect animation
+//                 will show it. Stock models show their reload. Default 1.
+// block_reload    0 or 1. While E is held, report the magazine as full
+//                 so the engine refuses to reload. Default 1.
+//                 The true ammo count is restored when E is released,
+//                 and is what the readout always shows.
+//                 Requires require_use 1.
+// cancel_grace    0.0 to 2.0. Default 0.35. Only applies when R is
+//                 itself part of the trigger, stopping the chord from
+//                 cancelling the inspect it just started.
+//                 Fire and shove always cancel instantly, and so does
+//                 R when it is not a trigger key. Cancelling reloads
+//                 normally straight away - no double press needed.
+// spoof_time      0.5 to 10.0. Seconds the magazine is reported full
+//                 after each inspect, covering the animation so no
+//                 reload can start. Default 2.50. Raise it if a long
+//                 custom inspect animation gets cut short.
+// cooldown        0.0 to 10.0. Seconds between inspects. Default 1.20.
+// melee_ok        0 or 1. Allow inspecting melee and clipless items.
+//                 Default 1.
+// debug           0 or 1. Verbose console diagnostics. Default 0.
+// ============================================================
+enable 1
+trigger combo
+combo speed+use
+hold_time 0.30
+chat_command !ammo
+key alt1
+modifier none
+require_use 0
+output_center 1
+play_animation 1
+anim_source auto
+block_reload 1
+spoof_time 2.50
+cancel_grace 0.35
+cooldown 1.20
+melee_ok 1
+debug 0

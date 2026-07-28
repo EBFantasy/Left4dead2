@@ -1,0 +1,14 @@
+"AddonInfo"
+{
+	addonSteamAppID		550
+
+	addontitle		"Weapon Inspect Ammo Check"
+	addonversion		"1.8.0"
+	addonauthor		"EpicBF"
+	addonauthorSteamID	""
+	addonURL0		"https://github.com/EBFantasy/Left4dead2"
+
+	addonDescription	"Hold Shift and press E (or type !ammo in chat) to inspect the weapon in your hands: it plays the weapon's own item-pickup/inspect animation without actually reloading, and shows the remaining ammo in the centre of the screen. No ammo is ever spent or gained. Configure in left4dead2/ems/ebf_inspect_ammo/settings.txt. Diagnostics: script EBFInspectAmmo.Status()"
+
+	addonContent_Script	1
+}
