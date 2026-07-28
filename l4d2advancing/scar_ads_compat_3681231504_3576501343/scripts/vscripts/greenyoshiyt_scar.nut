@@ -255,8 +255,36 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
 
                                         greenyoshiyt_scarL_mode.FoundSurvivors[greenyoshiyt].Releasing = 1
 
-                                        NetProps.SetPropFloat(greenyoshiyt.GetActiveWeapon(), "m_flNextPrimaryAttack", Time() + 100.0);
-                                        NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", Time() + 100.0);
+                                        // THE SHOVE DELAY LIVES HERE.
+                                        //
+                                        // Parking the attack timers 100s in the
+                                        // future is how the script holds a
+                                        // semi-auto shot back. But m_flNextAttack
+                                        // gates the SECONDARY attack as well, so
+                                        // while it is parked the engine silently
+                                        // drops the player's right-click too.
+                                        //
+                                        // Releasing only happens later, in the
+                                        // Player-Think pass further down, so the
+                                        // press that arrived this tick is already
+                                        // gone by then: a tap reads as "nothing
+                                        // happened" and a hold needs another tick.
+                                        // That is the latency, and it is original
+                                        // SCAR behaviour, not something the ADS
+                                        // work introduced.
+                                        //
+                                        // If the player is shoving right now, do
+                                        // not park the timers at all - let the
+                                        // shove through on this very tick.
+                                        if(button & 2048)
+                                        {
+                                            greenyoshiyt_scarL_mode.FoundSurvivors[greenyoshiyt].Releasing = 0
+                                        }
+                                        else
+                                        {
+                                            NetProps.SetPropFloat(greenyoshiyt.GetActiveWeapon(), "m_flNextPrimaryAttack", Time() + 100.0);
+                                            NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", Time() + 100.0);
+                                        }
                                     }
                                 }
                             }
