@@ -30,9 +30,71 @@ if (!("ScarShoveDebugCount" in getroottable()))
 ::ScarDbg <- function (msg)
 {
     if (!::ScarShoveDebug) return
-    if (::ScarShoveDebugCount >= 120) return
+    if (::ScarShoveDebugCount >= 400) return
     ::ScarShoveDebugCount++
     printl("[SCARDBG] " + msg)
+}
+
+// ---------------------------------------------------------------------------
+// v6 instrumentation.
+//
+// The v5 log was nearly silent - 70 SCAR shots but only 4 diagnostic lines and
+// ZERO from the Observe pass - which means the burst pipeline never ran at all
+// and the shove problem lives somewhere none of the previous logging covered.
+// These trace the paths that were invisible.
+// ---------------------------------------------------------------------------
+
+// Rate-limited per-key logger, so a per-tick event reports its first few
+// occurrences and then a periodic heartbeat instead of flooding.
+if (!("ScarDbgSeen" in getroottable()))
+    ::ScarDbgSeen <- {}
+
+::ScarDbgOnce <- function (key, msg, every = 200)
+{
+    if (!::ScarShoveDebug) return
+    if (!(key in ::ScarDbgSeen)) ::ScarDbgSeen[key] <- 0
+    ::ScarDbgSeen[key]++
+    local n = ::ScarDbgSeen[key]
+    if (n <= 3 || (n % every) == 0)
+        printl("[SCARDBG] " + msg + "  (#" + n + ")")
+}
+
+// Snapshot of everything that can gate a shove, printed only when it changes.
+if (!("ScarDbgLastState" in getroottable()))
+    ::ScarDbgLastState <- {}
+
+::ScarDbgShoveGates <- function (player, tag)
+{
+    if (!::ScarShoveDebug) return
+    try
+    {
+        local now = Time()
+        local wep = player.GetActiveWeapon()
+        if (wep == null) return
+
+        local id       = player.GetEntityIndex()
+        local nextAtk  = NetProps.GetPropFloat(player, "m_flNextAttack")
+        local nextSec  = NetProps.GetPropFloat(wep, "m_flNextSecondaryAttack")
+        local penalty  = NetProps.GetPropInt(player, "m_iShovePenalty")
+        local forced   = NetProps.GetPropInt(player, "m_afButtonForced")
+        local disabled = NetProps.GetPropInt(player, "m_afButtonDisabled")
+
+        // Which of them would actually stop a right-click this tick.
+        local blockers = ""
+        if (nextAtk > now)  blockers += "MASTER(+" + (nextAtk - now) + "s) "
+        if (nextSec > now)  blockers += "SECONDARY(+" + (nextSec - now) + "s) "
+        if (disabled & 2048) blockers += "BUTTON_DISABLED "
+        if (penalty > 0)    blockers += "PENALTY(" + penalty + ") "
+        if (blockers == "") blockers = "none"
+
+        local sig = blockers + "|" + (forced & 2048)
+        if (id in ::ScarDbgLastState && ::ScarDbgLastState[id] == sig) return
+        ::ScarDbgLastState[id] <- sig
+
+        ::ScarDbg(tag + " gates -> " + blockers
+            + " forcedShoveBit=" + ((forced & 2048) ? 1 : 0))
+    }
+    catch (e) { }
 }
 
 // Reports whether the engine would currently accept a shove, and why not.
@@ -379,6 +441,12 @@ if (!("ScarShoveDebugCount" in getroottable()))
                                             // Leaving m_flNextAttack alone keeps
                                             // the shove path - and reload - alive
                                             // with no change to firing behaviour.
+                                            //
+                                            // v6: logging restored. Dropping it in
+                                            // v5 is why the last log could not show
+                                            // whether this pass runs at all.
+                                            ::ScarDbgOnce("obs_park",
+                                                "Observe: parking PRIMARY only (master gate untouched)")
                                             NetProps.SetPropFloat(greenyoshiyt.GetActiveWeapon(), "m_flNextPrimaryAttack", Time() + 100.0);
                                         }
                                     }
@@ -624,6 +692,22 @@ if (!("ScarShoveDebugCount" in getroottable()))
                             // seconds out. Anything beyond that is a leftover, so
                             // pull it back.
                             local nowT3 = Time()
+
+                            // v6: trace every genuine right-click through this
+                            // tick, and report what (if anything) is gating it.
+                            // The previous logs only ever fired from inside the
+                            // burst pipeline, which the last session shows never
+                            // ran - so a shove pressed outside it was completely
+                            // invisible. This runs every tick for every player
+                            // holding a SCAR, independent of fire mode.
+                            local syntheticNow = (greenyoshiyt.GetEntityIndex() in ::ScarAutoSyntheticShove)
+                            if((button & 2048) && !syntheticNow)
+                            {
+                                ::ScarDbgOnce("think_real_shove",
+                                    "PlayerThink: GENUINE right-click seen", 60)
+                                ::ScarDbgShoveGates(greenyoshiyt, "PlayerThink")
+                            }
+
                             if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT3 + 5.0)
                             {
                                 ::ScarDbg("PlayerThink: STALE master gate found -> clearing")
@@ -736,6 +820,16 @@ if (!("ScarShoveDebugCount" in getroottable()))
             {
                 currentmode = greenyoshiyt_scarL_mode.Const.bot_default_fire_mode
             }
+
+            // v6: the v5 log recorded 70 rifle_desert shots and not one single
+            // Observe-pass line, which can only happen if this branch is not
+            // being taken. Everything the shove fixes touch lives downstream of
+            // it, so if the weapon is in BURST mode (currentmode 0) none of
+            // that code has ever executed and the shove problem is somewhere
+            // else entirely. Report the mode so this stops being a guess.
+            ::ScarDbgOnce("firemode", "weapon_fire: fire mode = " + currentmode
+                + (currentmode == 1 ? " (FULL AUTO - shove pipeline active)"
+                                    : " (BURST - shove pipeline SKIPPED)"))
 
             if(currentmode == 1)
             {

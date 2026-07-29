@@ -56,7 +56,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	::SmoothRecoilPunch <- {};
 }
 
-::SmoothRecoilPunch.rawset("VERSION", "0.9.5-punch");
+::SmoothRecoilPunch.rawset("VERSION", "0.9.6-punch");
 ::SmoothRecoilPunch.rawset("DEBUG", true);
 
 // Netprop paths. The "localdata." prefix is required: these live in the
@@ -95,7 +95,25 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 //
 // A small bounded value still gives the smooth accelerating onset that makes
 // this feel like a modern shooter, but now it decays instead of saturating.
-::SmoothRecoilPunch.rawset("VEL_ASSIST", 0.18);
+// v0.9.6: DISABLED. This is the cause of the "sudden surge partway through a
+// burst" report, and the log is unambiguous about it.
+//
+// Velocity saturated at the clamp on 47% of all shots. Once pinned, the engine
+// keeps integrating a constant -110 into the angle every tick while the spring
+// simultaneously pulls back, so how far the view actually moves per shot stops
+// depending on the shot at all and starts depending on where in the tick the
+// round happened to land. Measured ADS steps ran
+//
+//     1.22  ->  2.38  ->  0.26  ->  0.35  ->  0.44  ->  1.54  ->  2.60
+//
+// i.e. step/request wandered between 0.09x and 10.62x - a 117-fold spread.
+// That is precisely "it suddenly jumps hard partway through, and it does not
+// feel connected to what I am doing".
+//
+// The angle write alone is smooth, predictable and already produces the climb.
+// The velocity assist only ever added noise, so it is off. Kept as a tunable
+// rather than deleted so the behaviour can be compared if ever needed.
+::SmoothRecoilPunch.rawset("VEL_ASSIST", 0.0);
 ::SmoothRecoilPunch.rawset("VEL_CLAMP", 110.0);
 
 // Per-shot climb, in degrees. Negative pitch moves the view UP.
@@ -212,6 +230,47 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 ::SmoothRecoilPunch.rawset("CLIMB_HIP", 0.0);    // hip-fire: unchanged, do not tune
 ::SmoothRecoilPunch.rawset("CLIMB_ADS", 1.30);   // extra degrees at full burst, aiming
 ::SmoothRecoilPunch.rawset("CLIMB_SHOTS", 9.0);  // rounds to reach full climb
+
+//-----------------------------------------------------------------------------
+// Slow recovery for single-shot weapons  (v0.9.6)
+//
+// THE PROBLEM
+// On the AWP, Scout, chrome shotgun and pump shotgun the view snapped back down
+// almost immediately, so the recoil barely registered.
+//
+// WHY THE OBVIOUS FIXES DO NOT WORK
+// Recovery is the engine's damped spring, and both of its constants are
+// compiled in and unreachable from VScript:
+//     PUNCH_DAMPING          9.0
+//     PUNCH_SPRING_CONSTANT 65.0
+// Measured, every weapon returns to 10% of its peak in the SAME 283ms no matter
+// how hard it kicked - the curve's shape is independent of amplitude. So simply
+// raising these weapons' recoil makes them climb higher but recover exactly as
+// fast, which is not what was asked for.
+//
+// THE METHOD THAT DOES WORK
+// The spring is re-evaluated every tick from the CURRENT angle, so if we give
+// a little of it back each frame we flatten the top of the curve without ever
+// fighting the mouse - this still only touches the punch angle, never the eye
+// angle. For HOLD_FRAMES frames after the shot, HOLD_FRACTION of whatever the
+// spring just removed is restored:
+//
+//     AWP recovery to 10%:  283ms stock  ->  467ms held   (1.6x slower)
+//
+// The view hangs at the top for a beat and then falls away naturally, which
+// reads as a heavy weapon rather than a twitchy one.
+//
+// Deliberately limited to these four. Pistols are explicitly excluded, as are
+// all automatics - on a fast weapon a hold would stack across shots.
+::SmoothRecoilPunch.rawset("HOLD_FRAMES", 18);
+::SmoothRecoilPunch.rawset("HOLD_FRACTION", 0.85);
+
+::SmoothRecoilPunch.rawset("slowRecovery", {
+	awp = true,
+	scout = true,
+	chrome_shotgun = true,
+	pumpshotgun = true
+});
 
 // Anomaly backstop: the largest single-frame climb allowed, as a MULTIPLE of
 // the weapon's own base kick.
@@ -339,6 +398,8 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			pending = 0,     // rounds seen but not yet paid out (one per frame)
 			lastAng = 0.0,   // previous punch pitch, for step diagnostics
 			ads = false,     // aiming at the time of the last shot
+			hold = 0,        // frames of slow-recovery hold remaining
+			holdPrev = 0.0,  // punch pitch as we left it last frame
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -413,6 +474,18 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	if (climbMax > 0.0 && state.shots > 1) {
 		local prog = (state.shots - 1).tofloat() / ::SmoothRecoilPunch.CLIMB_SHOTS;
 		if (prog > 1.0) prog = 1.0;
+
+		// v0.9.6: ease the climb in and out instead of ramping it linearly.
+		//
+		// A linear ramp adds a constant increment per shot, then stops dead the
+		// moment it reaches full. Both the start and the end of that ramp are
+		// corners in the curve, and a corner is felt as "the recoil suddenly
+		// changes character partway through the burst" - which is the report.
+		//
+		// smoothstep has zero slope at both ends, so the climb fades in from
+		// nothing and settles into its ceiling with no discontinuity anywhere.
+		prog = prog * prog * (3.0 - (2.0 * prog));
+
 		pitch = pitch - (climbMax * prog);
 	}
 
@@ -527,6 +600,16 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		return false;
 	}
 
+	// Arm the slow-recovery hold for the heavy single-shot weapons. Tick does
+	// the per-frame work; this only starts the timer. Re-arming on every shot
+	// is correct: these weapons cannot fire fast enough for holds to stack.
+	if (cls in ::SmoothRecoilPunch.slowRecovery) {
+		state.hold = ::SmoothRecoilPunch.HOLD_FRAMES;
+		state.holdPrev = 0.0;      // established on the next frame
+	} else {
+		state.hold = 0;
+	}
+
 	if (::SmoothRecoilPunch.DEBUG && ::SmoothRecoilPunch._shotLogs < 30) {
 		::SmoothRecoilPunch._shotLogs += 1;
 
@@ -609,6 +692,41 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		local state = ::SmoothRecoilPunch.StateOf(player);
 		if (state == null)
 			continue;
+
+		// --- slow-recovery hold -------------------------------------------
+		//
+		// Runs before shot detection so a hold left over from the previous
+		// round can never eat into this frame's kick.
+		//
+		// The engine decays the punch angle every tick. Here we simply hand a
+		// fraction of that decay back, which flattens the top of the curve.
+		// Only the punch angle is touched - never the eye angle - so this
+		// cannot interfere with the mouse.
+		if (state.hold > 0) {
+			try {
+				local hv = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
+				if (hv != null) {
+					if (state.holdPrev < 0.0) {
+						// How much the spring removed since last frame.
+						local recovered = hv.x - state.holdPrev;
+						if (recovered > 0.0) {
+							local giveBack = recovered * ::SmoothRecoilPunch.HOLD_FRACTION;
+							local hx = hv.x - giveBack;
+							if (hx < -::SmoothRecoilPunch.MAX_PITCH)
+								hx = -::SmoothRecoilPunch.MAX_PITCH;
+							if (hx > 0.0)
+								hx = 0.0;
+							NetProps.SetPropVector(player,
+								::SmoothRecoilPunch.PROP_PUNCH,
+								Vector(hx, hv.y, hv.z));
+							hv = Vector(hx, hv.y, hv.z);
+						}
+					}
+					state.holdPrev = hv.x;
+				}
+			} catch (e) { }
+			state.hold -= 1;
+		}
 
 		local weapon = null;
 		try { weapon = player.GetActiveWeapon(); } catch (e) { }
