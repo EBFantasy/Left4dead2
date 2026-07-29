@@ -56,7 +56,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	::SmoothRecoilPunch <- {};
 }
 
-::SmoothRecoilPunch.rawset("VERSION", "0.9.7-punch");
+::SmoothRecoilPunch.rawset("VERSION", "0.9.8-punch");
 ::SmoothRecoilPunch.rawset("DEBUG", true);
 
 // Netprop paths. The "localdata." prefix is required: these live in the
@@ -259,7 +259,34 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 // addon still gets to apply its correction, just spread over a few frames
 // instead of one, which removes the lump without lowering where the burst
 // finally tops out.
-::SmoothRecoilPunch.rawset("ADS_SMOOTH", true);
+// v0.9.8 - IN ADS, DO NOT WRITE THE PUNCH ANGLE AT ALL.
+//
+// The bullet-hole photo settled this: aimed fire lands in three tight CLUSTERS
+// with large gaps between them, not a smooth climb. Replaying the log confirms
+// it numerically - shots 1-7 all land inside a 4 degree band, then the view
+// jumps 3.48 and 3.31 degrees in consecutive shots.
+//
+// The cause is two systems writing localdata.m_Local.m_vecPunchAngle at once.
+// ads_base.nut does, from an animation callback:
+//
+//     Recoil = last_recoil + (PunchAngle - last_recoil) * RecoilFactor
+//
+// It samples last_recoil at fire time and rewrites the angle when the animation
+// pass runs. Our per-shot writes land in between. While the animation lags, our
+// climb is repeatedly pulled back toward a stale last_recoil - so several shots
+// pile up at nearly the same angle, which is one cluster. When the pass finally
+// catches up it applies the whole accumulated difference at once - that is the
+// gap to the next cluster.
+//
+// Clamping the symptom cannot fix this, and every attempt so far has only
+// reshaped the clusters. Two writers on one variable is the problem, so in ADS
+// there is now exactly one: the ADS addon's own recoil, which is what that
+// addon is designed to provide. We simply stay out of it.
+//
+// Hip-fire is untouched and keeps the full smooth-recoil behaviour.
+::SmoothRecoilPunch.rawset("ADS_HANDS_OFF", true);
+
+::SmoothRecoilPunch.rawset("ADS_SMOOTH", false);
 ::SmoothRecoilPunch.rawset("ADS_MAX_STEP", 1.60);  // hard ceiling, degrees/frame
 
 // A hard ceiling alone still allows 0.48 -> 1.60, a 3.3x jump that is felt.
@@ -533,6 +560,25 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	// moves that balance point upward while leaving shot 1 identical.
 	local aiming = ::SmoothRecoilPunch.IsAdsActive(player);
 	state.ads = aiming;
+
+	// While aiming, hand the punch angle entirely to the ADS addon. Writing it
+	// from here as well is what produced the clustered bullet pattern.
+	if (aiming && ::SmoothRecoilPunch.ADS_HANDS_OFF) {
+		state.hold = 0;
+		state.adsWatch = 0;
+		state.adsDebt = 0.0;
+		state.adsLast = 0.0;
+		if (::SmoothRecoilPunch.DEBUG && ::SmoothRecoilPunch._shotLogs < 30) {
+			::SmoothRecoilPunch._shotLogs += 1;
+			local ax = 0.0;
+			try {
+				ax = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH).x;
+			} catch (e) { }
+			::SmoothRecoilPunch.Dbg("shot#" + state.shots + " " + cls
+				+ " ADS -> hands off (ADS addon owns the recoil) ang=" + ax);
+		}
+		return true;
+	}
 
 	local climbMax = aiming
 		? ::SmoothRecoilPunch.CLIMB_ADS

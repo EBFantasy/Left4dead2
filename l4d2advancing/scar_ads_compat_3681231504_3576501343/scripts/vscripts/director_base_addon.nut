@@ -6,7 +6,7 @@ if(!IncludeScript("greenyoshiyt_scar"))
 }
 else
 {
-	printl("[SCAR-L Mode Selector] ADS compatibility version loaded  (build: shove-fix v8 yield-to-real, 2026-07-29)");
+	printl("[SCAR-L Mode Selector] ADS compatibility version loaded  (build: shove-fix v9 keep-forced-bit, 2026-07-29)");
 }
 
 

@@ -558,7 +558,17 @@ if (!("ScarDbgLastState" in getroottable()))
                         NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", NewAttack);
                     }
                     NetProps.SetPropFloat(weapon, "m_flNextPrimaryAttack", NewAttack);
-                    NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") &~ 2048)
+                    // v9: only strip the forced shove bit when it is OURS.
+                    //
+                    // RunCommand does  ucmd->buttons |= m_afButtonForced
+                    // BEFORE UpdateButtonState assigns m_nButtons, and this
+                    // line runs every tick unconditionally. On the very tick
+                    // the player presses shove, clearing the bit removes it
+                    // from the command that same frame, so the press can be
+                    // erased before the weapon ever evaluates IN_ATTACK2.
+                    // Leave it alone while a genuine press is being held.
+                    if(!realShove)
+                        NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") &~ 2048)
                     // The synthetic shove is over; drop the token in the same
                     // place the forced bit is cleared so it can never linger
                     // and swallow a later real right-click.
