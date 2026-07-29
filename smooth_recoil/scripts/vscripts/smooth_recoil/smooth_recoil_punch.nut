@@ -260,7 +260,22 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 // instead of one, which removes the lump without lowering where the burst
 // finally tops out.
 ::SmoothRecoilPunch.rawset("ADS_SMOOTH", true);
-::SmoothRecoilPunch.rawset("ADS_MAX_STEP", 1.60);  // degrees per aimed shot
+::SmoothRecoilPunch.rawset("ADS_MAX_STEP", 1.60);  // hard ceiling, degrees/frame
+
+// A hard ceiling alone still allows 0.48 -> 1.60, a 3.3x jump that is felt.
+// This also caps each frame at a MULTIPLE of the previous one, so the strength
+// can only ever grow gradually. Replaying the real logged m60 sequence:
+//
+//   raw            0.82 0.30 0.48 0.66 0.81 0.92 1.01 1.05 0.48 3.48 3.31
+//   ceiling only   ...                                       0.48 1.60 1.60
+//   + growth cap   ...                                       0.48 0.72 1.08
+//
+//   worst adjacent jump:  7.2x raw  ->  3.3x ceiling  ->  1.5x with growth cap
+//
+// Nothing is discarded in any of these - the excess becomes debt and is repaid
+// on later frames, so the burst still tops out at the same height.
+::SmoothRecoilPunch.rawset("ADS_GROWTH", 1.50);    // max x previous frame
+::SmoothRecoilPunch.rawset("ADS_FLOOR", 0.45);     // always allow at least this
 
 //-----------------------------------------------------------------------------
 // Slow recovery for single-shot weapons  (v0.9.6)
@@ -450,6 +465,8 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			holdPrev = 0.0,  // punch pitch as we left it last frame
 			adsWatch = 0,    // frames left of ADS surge watching
 			adsPrev = 0.0,   // punch pitch seen last frame while aiming
+			adsDebt = 0.0,   // climb held back this frame, owed to later frames
+			adsLast = 0.0,   // per-frame climb actually allowed last frame
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -775,26 +792,60 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		// the angle to be delivered on following frames. Nothing is lost, so
 		// the burst still reaches the same height - it just gets there without
 		// the single-frame lump.
-		if (::SmoothRecoilPunch.ADS_SMOOTH && state.adsWatch) {
+		if (::SmoothRecoilPunch.ADS_SMOOTH && state.adsWatch > 0) {
 			try {
 				local cv = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
 				if (cv != null) {
-					local moved = state.adsPrev - cv.x;      // >0 means climbed
+					local moved = state.adsPrev - cv.x;   // >0 = climbed this frame
+
+					// Ceiling, plus a limit on how fast the per-frame strength
+					// may grow relative to the previous frame.
 					local lim = ::SmoothRecoilPunch.ADS_MAX_STEP;
+					if (state.adsLast > 0.0) {
+						local grow = state.adsLast * ::SmoothRecoilPunch.ADS_GROWTH;
+						if (grow < ::SmoothRecoilPunch.ADS_FLOOR)
+							grow = ::SmoothRecoilPunch.ADS_FLOOR;
+						if (grow < lim) lim = grow;
+					}
+					local newX = cv.x;
+
 					if (moved > lim) {
-						local capped = state.adsPrev - lim;
-						if (capped < -::SmoothRecoilPunch.MAX_PITCH)
-							capped = -::SmoothRecoilPunch.MAX_PITCH;
-						if (capped > 0.0) capped = 0.0;
+						// Too violent for one frame. Hold the excess back as a
+						// DEBT rather than throwing it away, so the burst still
+						// reaches the same height - it just gets there over a
+						// few frames instead of in one jolt.
+						state.adsDebt += (moved - lim);
+						if (state.adsDebt > 8.0) state.adsDebt = 8.0;
+						newX = state.adsPrev - lim;
+					}
+					else if (state.adsDebt > 0.0) {
+						// Pay the debt back using whatever headroom this frame
+						// has left, so nothing is lost.
+						local room = lim - moved;
+						if (room > 0.0) {
+							local pay = state.adsDebt;
+							if (pay > room) pay = room;
+							newX = cv.x - pay;
+							state.adsDebt -= pay;
+						}
+					}
+
+					if (newX < -::SmoothRecoilPunch.MAX_PITCH)
+						newX = -::SmoothRecoilPunch.MAX_PITCH;
+					if (newX > 0.0) newX = 0.0;
+
+					if (newX != cv.x) {
 						NetProps.SetPropVector(player,
 							::SmoothRecoilPunch.PROP_PUNCH,
-							Vector(capped, cv.y, cv.z));
-						cv = Vector(capped, cv.y, cv.z);
+							Vector(newX, cv.y, cv.z));
 					}
-					state.adsPrev = cv.x;
+					state.adsPrev = newX;
+					state.adsLast = moved;
+					if (state.adsLast > lim) state.adsLast = lim;
 				}
 			} catch (e) { }
 			state.adsWatch -= 1;
+			if (state.adsWatch <= 0) { state.adsDebt = 0.0; state.adsLast = 0.0; }
 		}
 
 		if (state.hold > 0) {
