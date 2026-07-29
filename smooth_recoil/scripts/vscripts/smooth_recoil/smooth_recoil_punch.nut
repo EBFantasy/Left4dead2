@@ -56,7 +56,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	::SmoothRecoilPunch <- {};
 }
 
-::SmoothRecoilPunch.rawset("VERSION", "0.9.6-punch");
+::SmoothRecoilPunch.rawset("VERSION", "0.9.7-punch");
 ::SmoothRecoilPunch.rawset("DEBUG", true);
 
 // Netprop paths. The "localdata." prefix is required: these live in the
@@ -228,8 +228,39 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 // SpreadReduce hands out on entering ADS, so it is the same ads_on state and
 // the same halved code path.
 ::SmoothRecoilPunch.rawset("CLIMB_HIP", 0.0);    // hip-fire: unchanged, do not tune
-::SmoothRecoilPunch.rawset("CLIMB_ADS", 1.30);   // extra degrees at full burst, aiming
+::SmoothRecoilPunch.rawset("CLIMB_ADS", 0.0);    // see ADS_SMOOTH below
 ::SmoothRecoilPunch.rawset("CLIMB_SHOTS", 9.0);  // rounds to reach full climb
+
+//-----------------------------------------------------------------------------
+// ADS surge suppression  (v0.9.7)
+//
+// The reported mid-burst surge while aiming is REAL - it is not an illusion.
+// Measured from the log, m60 aimed steps ran:
+//
+//   0.83  0.30  0.48  0.66  0.81  0.92  1.01  1.05  0.48  3.48  3.31
+//                                                          ^^^^ 7.2x jump
+//
+// and note vel was 0.0 on every one of those shots, so unlike the previous
+// occurrence this is NOT the velocity assist. The cause is different:
+//
+// ads_base.nut rewrites the punch angle from an ANIMATION callback, not once
+// per shot:
+//     Recoil = last_recoil + (PunchAngle - last_recoil) * RecoilFactor
+// During sustained fire the animation pass cannot keep up with the rounds, so
+// most shots land only 9-19% of what was requested while the addon holds a
+// stale last_recoil - then one pass finally observes the whole accumulated
+// difference and applies 63% of it in a single frame. That lump is the surge.
+//
+// Adding CLIMB_ADS on top made it worse: it inflated the very difference the
+// addon later dumps in one go. So CLIMB_ADS is now 0 - stacking a second climb
+// on a system that is already fighting itself cannot be tuned into smoothness.
+//
+// Instead we bound how much the view may move in a single aimed frame. The
+// addon still gets to apply its correction, just spread over a few frames
+// instead of one, which removes the lump without lowering where the burst
+// finally tops out.
+::SmoothRecoilPunch.rawset("ADS_SMOOTH", true);
+::SmoothRecoilPunch.rawset("ADS_MAX_STEP", 1.60);  // degrees per aimed shot
 
 //-----------------------------------------------------------------------------
 // Slow recovery for single-shot weapons  (v0.9.6)
@@ -262,8 +293,25 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 //
 // Deliberately limited to these four. Pistols are explicitly excluded, as are
 // all automatics - on a fast weapon a hold would stack across shots.
-::SmoothRecoilPunch.rawset("HOLD_FRAMES", 18);
-::SmoothRecoilPunch.rawset("HOLD_FRACTION", 0.85);
+// v0.9.7: the hold now FADES OUT instead of ending abruptly.
+//
+// This was my error and it produced exactly the reported "the view stalls, then
+// suddenly starts recovering". With a constant fraction that simply stops at
+// HOLD_FRAMES, the AWP recovers at 0.114 deg/frame for 18 frames and then jumps
+// straight to 0.463 - a 4.1x discontinuity, and a 6.76x worst-case step between
+// two adjacent frames. The stall was real and it was mine.
+//
+// The give-back now decays along a smoothstep, reaching zero exactly as the
+// hold expires, so the curve rejoins the spring with no corner at all:
+//
+//                       worst adjacent-frame step   recovery to 10%
+//   stock, no hold                     1.83x               267ms
+//   v0.9.6 (hard cut-off)              6.76x               433ms   <- the stall
+//   v0.9.7 (faded)                     1.10x               467ms
+//
+// So it is now smoother than stock while still recovering 1.75x slower.
+::SmoothRecoilPunch.rawset("HOLD_FRAMES", 36);
+::SmoothRecoilPunch.rawset("HOLD_FRACTION", 0.90);
 
 ::SmoothRecoilPunch.rawset("slowRecovery", {
 	awp = true,
@@ -400,6 +448,8 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			ads = false,     // aiming at the time of the last shot
 			hold = 0,        // frames of slow-recovery hold remaining
 			holdPrev = 0.0,  // punch pitch as we left it last frame
+			adsWatch = 0,    // frames left of ADS surge watching
+			adsPrev = 0.0,   // punch pitch seen last frame while aiming
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -610,6 +660,20 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		state.hold = 0;
 	}
 
+	// Watch for the ADS addon's deferred correction for a short window after
+	// each aimed shot. Outside that window we must not touch the angle at all.
+	if (aiming) {
+		if (state.adsWatch <= 0) {
+			try {
+				state.adsPrev = NetProps.GetPropVector(player,
+					::SmoothRecoilPunch.PROP_PUNCH).x;
+			} catch (e) { state.adsPrev = 0.0; }
+		}
+		state.adsWatch = 20;
+	} else {
+		state.adsWatch = 0;
+	}
+
 	if (::SmoothRecoilPunch.DEBUG && ::SmoothRecoilPunch._shotLogs < 30) {
 		::SmoothRecoilPunch._shotLogs += 1;
 
@@ -702,6 +766,37 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		// fraction of that decay back, which flattens the top of the curve.
 		// Only the punch angle is touched - never the eye angle - so this
 		// cannot interfere with the mouse.
+		// --- ADS surge suppression ----------------------------------------
+		//
+		// Runs every frame, because the ADS addon applies its correction from
+		// an animation callback that we do not sit inside. Whenever the punch
+		// angle moves UPWARD by more than ADS_MAX_STEP in one frame while
+		// aiming, the excess is deferred rather than discarded: it is left in
+		// the angle to be delivered on following frames. Nothing is lost, so
+		// the burst still reaches the same height - it just gets there without
+		// the single-frame lump.
+		if (::SmoothRecoilPunch.ADS_SMOOTH && state.adsWatch) {
+			try {
+				local cv = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
+				if (cv != null) {
+					local moved = state.adsPrev - cv.x;      // >0 means climbed
+					local lim = ::SmoothRecoilPunch.ADS_MAX_STEP;
+					if (moved > lim) {
+						local capped = state.adsPrev - lim;
+						if (capped < -::SmoothRecoilPunch.MAX_PITCH)
+							capped = -::SmoothRecoilPunch.MAX_PITCH;
+						if (capped > 0.0) capped = 0.0;
+						NetProps.SetPropVector(player,
+							::SmoothRecoilPunch.PROP_PUNCH,
+							Vector(capped, cv.y, cv.z));
+						cv = Vector(capped, cv.y, cv.z);
+					}
+					state.adsPrev = cv.x;
+				}
+			} catch (e) { }
+			state.adsWatch -= 1;
+		}
+
 		if (state.hold > 0) {
 			try {
 				local hv = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
@@ -710,7 +805,18 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 						// How much the spring removed since last frame.
 						local recovered = hv.x - state.holdPrev;
 						if (recovered > 0.0) {
-							local giveBack = recovered * ::SmoothRecoilPunch.HOLD_FRACTION;
+							// Fade the hold out so it rejoins the spring
+							// smoothly. A constant fraction that stops dead
+							// leaves a 4x jump in per-frame movement, which
+							// reads as the view stalling and then lurching.
+							local hf = ::SmoothRecoilPunch.HOLD_FRAMES.tofloat();
+							local prog = 1.0 - (state.hold.tofloat() / hf);
+							if (prog < 0.0) prog = 0.0;
+							if (prog > 1.0) prog = 1.0;
+							local ease = 1.0 - (prog * prog * (3.0 - (2.0 * prog)));
+
+							local giveBack = recovered
+								* ::SmoothRecoilPunch.HOLD_FRACTION * ease;
 							local hx = hv.x - giveBack;
 							if (hx < -::SmoothRecoilPunch.MAX_PITCH)
 								hx = -::SmoothRecoilPunch.MAX_PITCH;

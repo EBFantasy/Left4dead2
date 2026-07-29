@@ -602,9 +602,47 @@ if (!("ScarDbgLastState" in getroottable()))
                         local NewAttack = PreviousAttack + custom_aspd
 
 
-                        // Mark this shove as script-synthesised, then force it.
-                        ::ScarAutoSyntheticShove[greenyoshiyt.GetEntityIndex()] <- true
-                        NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") | 2048)
+                        // v8 diagnostic: this fires on EVERY auto shot and is
+                        // the prime remaining suspect. It forces IN_ATTACK2 to
+                        // drive the shove animation, so if the player's real
+                        // right-click arrives while this synthetic one is in
+                        // flight the engine has already spent the shove and the
+                        // press is silently absorbed. Report how close together
+                        // they are.
+                        // v8 - YIELD TO A REAL PRESS.
+                        //
+                        // This runs on EVERY auto shot and forces IN_ATTACK2
+                        // to drive the shove animation. If the player is
+                        // holding the real shove button at that moment the
+                        // engine sees one IN_ATTACK2 and spends it on the
+                        // synthetic shove, so the press produces nothing.
+                        // Auto fire triggers this continuously, which would
+                        // swallow a held right-click shot after shot - and
+                        // that matches "no change at all" regardless of what
+                        // the attack gates say.
+                        //
+                        // So do not synthesise on top of a genuine press.
+                        // PlayerAttack below still drives the animation, so
+                        // the auto rhythm is unchanged.
+                        local realHold = (greenyoshiyt.GetButtonMask() & 2048) ? true : false
+
+                        if(realHold)
+                        {
+                            ::ScarDbgOnce("yield",
+                                "Process shots: real shove held -> NOT synthesising, letting the players own shove through", 25)
+                            local nowY = Time()
+                            if(NetProps.GetPropFloat(weapon, "m_flNextSecondaryAttack") > nowY)
+                                NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", nowY)
+                            if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowY)
+                                NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowY)
+                            if(NetProps.GetPropInt(greenyoshiyt, "m_iShovePenalty") > 0)
+                                NetProps.SetPropInt(greenyoshiyt, "m_iShovePenalty", 0)
+                        }
+                        else
+                        {
+                            ::ScarAutoSyntheticShove[greenyoshiyt.GetEntityIndex()] <- true
+                            NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") | 2048)
+                        }
                         greenyoshiyt_scarL_mode.PlayerAttack[greenyoshiyt] <- PreviousAttack
 
                         greenyoshiyt_scarL_mode.Shooter.remove(index)
