@@ -73,12 +73,13 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 
 // Fraction of the kick applied as instant angle rather than velocity.
 // 0.0 = fully smooth ramp (modern FPS). 0.25 or so adds a crisper onset.
-// v0.9.2: default is now 0.
-// Any non-zero value writes part of the kick straight into the ANGLE, which
-// lands in a single frame while the rest of the kick ramps in smoothly over
-// ~8 frames. Mixing the two gives every shot a small step, read as "the climb
-// is jerky". Set this above 0 only if you deliberately want a crisper onset.
+// v0.9.3: the kick is written straight into the punch ANGLE, so there is no
+// longer an instant-vs-ramp split. Retained only so old configs do not error.
 ::SmoothRecoilPunch.rawset("INSTANT_FRACTION", 0.0);
+
+// Extra velocity added alongside the angle. Ignored where the server cannot
+// drive velocity; harmless there. 0 disables it.
+::SmoothRecoilPunch.rawset("VEL_ASSIST", 0.35);
 
 // Per-shot climb, in degrees. Negative pitch moves the view UP.
 // Reused from the existing core so the feel stays comparable.
@@ -282,29 +283,54 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	local viaVel = 1.0 - instant;
 
 	try {
-		// --- velocity component: the smooth accelerating climb -------------
-		local vel = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL);
-		if (vel == null) {
-			vel = Vector(0, 0, 0);
+		// v0.9.3 - write the ANGLE, not the velocity.
+		//
+		// The readback settled this. With INSTANT_FRACTION at 0 the script
+		// wrote only m_vecPunchAngleVel, and the log shows that velocity
+		// climbing -23, -47, -74 ... -512 while the angle never moved off a
+		// handful of values (-0.9 / -1.125 / -1.5 / -1.875) that are just
+		// L4D2's own weapon kick. The engine never integrated our velocity
+		// into an angle: m_vecPunchAngleVel is owned by client prediction and
+		// a server-side write to it is discarded.
+		//
+		// m_vecPunchAngle itself IS honoured server-side - that is why the
+		// earlier build, which wrote a slice of the kick straight into the
+		// angle, produced visible climb. So accumulate into the angle and let
+		// the client's spring pull it back down.
+		local ang = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
+		if (ang == null) {
+			ang = Vector(0, 0, 0);
 		}
-		NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL,
-			Vector(vel.x + (pitch * viaVel * ::SmoothRecoilPunch.VEL_SCALE),
-			       vel.y + (yaw   * viaVel * ::SmoothRecoilPunch.VEL_SCALE),
-			       vel.z));
 
-		// --- optional instant component: a crisper onset -------------------
-		if (instant > 0.0) {
-			local ang = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
-			if (ang == null) {
-				ang = Vector(0, 0, 0);
-			}
-			local nx = ang.x + (pitch * instant);
-			if (nx < -::SmoothRecoilPunch.MAX_PITCH) {
-				nx = -::SmoothRecoilPunch.MAX_PITCH;
-			}
-			NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH,
-				Vector(nx, ang.y + (yaw * instant), ang.z));
+		local newX = ang.x + pitch;
+		local newY = ang.y + yaw;
+
+		if (newX < -::SmoothRecoilPunch.MAX_PITCH) {
+			newX = -::SmoothRecoilPunch.MAX_PITCH;
 		}
+		if (newX > 0.0) {
+			newX = 0.0;      // never push the view downward
+		}
+
+		NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH,
+			Vector(newX, newY, ang.z));
+
+		// Nudge the velocity too. It is ignored on dedicated setups but is
+		// free, and where it does apply it softens the per-shot step.
+		if (::SmoothRecoilPunch.VEL_ASSIST > 0.0) {
+			local vel = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL);
+			if (vel == null) {
+				vel = Vector(0, 0, 0);
+			}
+			// Clamp so a discarded write cannot accumulate without bound.
+			local vx = vel.x + (pitch * ::SmoothRecoilPunch.VEL_ASSIST * 20.0);
+			local vy = vel.y + (yaw   * ::SmoothRecoilPunch.VEL_ASSIST * 20.0);
+			if (vx < -400.0) { vx = -400.0; }
+			if (vx >  400.0) { vx =  400.0; }
+			NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL,
+				Vector(vx, vy, vel.z));
+		}
+
 	} catch (e) {
 		::SmoothRecoilPunch.Log("punch write failed: " + e);
 		return false;

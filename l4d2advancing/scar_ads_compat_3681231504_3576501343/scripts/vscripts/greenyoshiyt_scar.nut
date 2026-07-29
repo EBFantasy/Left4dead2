@@ -373,11 +373,43 @@ if (!("ScarShoveDebugCount" in getroottable()))
                 local weapon = greenyoshiyt.GetActiveWeapon()
                 if(weapon != null)
                 {
-                    if((button & 2048) && NewAttack > Time())
-                        ::ScarDbg("PlayerAttack: shove held but re-setting timers to " + NewAttack + " (delta +" + (NewAttack - Time()) + "s)")
-                    NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", NewAttack);
+                    // THIS is where a real right-click actually dies.
+                    //
+                    // The diagnostics settled it: "before-clear" never fired
+                    // once (the Observe-pass branch is unreachable, an earlier
+                    // "if(button & 2048) ... continue" short-circuits it), while
+                    // this line ran 31 times in one session, each time pushing
+                    // the timers ~0.133s further out.
+                    //
+                    // This block exists to drive the synthetic-shove animation,
+                    // but it re-parks m_flNextSecondaryAttack unconditionally.
+                    // While the player holds shove that parking is renewed every
+                    // tick, so the engine never sees a frame where a secondary
+                    // attack is allowed - the shove is starved rather than
+                    // delayed once.
+                    //
+                    // Fix: when the player is genuinely holding shove, leave the
+                    // secondary-attack gate open. The primary timers still get
+                    // the value they need for the animation and the burst
+                    // rhythm, so semi-auto behaviour is unchanged.
+                    local realShove = (button & 2048) ? true : false
+
+                    if(realShove)
+                    {
+                        ::ScarDbg("PlayerAttack: real shove held -> leaving secondary gate OPEN (was pushing +"
+                            + (NewAttack - Time()) + "s)")
+                        local nowT2 = Time()
+                        if(NetProps.GetPropFloat(weapon, "m_flNextSecondaryAttack") > nowT2)
+                            NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", nowT2);
+                        if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT2)
+                            NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowT2);
+                    }
+                    else
+                    {
+                        NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", NewAttack);
+                        NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", NewAttack);
+                    }
                     NetProps.SetPropFloat(weapon, "m_flNextPrimaryAttack", NewAttack);
-                    NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", NewAttack);
                     NetProps.SetPropInt(greenyoshiyt, "m_afButtonForced", NetProps.GetPropInt(greenyoshiyt, "m_afButtonForced") &~ 2048)
                     // The synthetic shove is over; drop the token in the same
                     // place the forced bit is cleared so it can never linger
