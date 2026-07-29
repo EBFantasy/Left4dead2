@@ -191,13 +191,25 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 // first round of a burst feel exactly as before, while a held trigger walks
 // the view visibly higher.
 //
-// CLIMB_ADS applies while aiming (ADS or laser). It is deliberately LARGER
-// than the hip value: ads_base.nut rewrites every aimed shot as
+// AIMED FIRE ONLY.
+//
+// CLIMB_HIP is deliberately 0: hip-fire recoil was reported as already correct,
+// so nothing about it changes. Only the aimed case is corrected.
+//
+// Why the aimed ceiling alone was too low: ads_base.nut rewrites every aimed
+// shot as
 //     last_recoil + (thisShot * RecoilFactor)
-// with RecoilFactor 0.5, which halves the per-shot contribution and is why the
-// aimed ceiling sat lowest of all. Compensating here - rather than by raising
-// RecoilFactor - keeps ADS single-shot recoil at its stock, calmer value.
-::SmoothRecoilPunch.rawset("CLIMB_HIP", 0.55);   // extra degrees at full burst, hip
+// with RecoilFactor at its stock 0.5, so half of each aimed shot's climb is
+// discarded. The spring then balances that weaker push at a much lower angle -
+// about 3.7 degrees aiming against 6.1 hip for the SCAR. Restoring the height
+// here, rather than by raising RecoilFactor, is what keeps aimed SINGLE-shot
+// recoil at the calmer value the ADS addon is meant to give: this term is zero
+// on shot 1 and only grows as a burst is held.
+//
+// The laser case needs no separate handling. The laser sight is what
+// SpreadReduce hands out on entering ADS, so it is the same ads_on state and
+// the same halved code path.
+::SmoothRecoilPunch.rawset("CLIMB_HIP", 0.0);    // hip-fire: unchanged, do not tune
 ::SmoothRecoilPunch.rawset("CLIMB_ADS", 1.30);   // extra degrees at full burst, aiming
 ::SmoothRecoilPunch.rawset("CLIMB_SHOTS", 9.0);  // rounds to reach full climb
 
