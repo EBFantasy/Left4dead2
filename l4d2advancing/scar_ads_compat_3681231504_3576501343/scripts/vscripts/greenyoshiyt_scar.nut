@@ -517,9 +517,40 @@ if (!("ScarDbgLastState" in getroottable()))
 
                     if(realShove)
                     {
-                        ::ScarDbg("PlayerAttack: GENUINE right-click -> secondary gate left open")
-                        // Do not touch the secondary gate or the master gate at
-                        // all; the shove is allowed to resolve this tick.
+                        // v7 - ACTIVELY REOPEN. This is the bug that made v5
+                        // and v6 look like they changed nothing in full auto.
+                        //
+                        // v0.9.4 replaced the gate-clearing here with nothing
+                        // but a comment saying the gate is "left open". It is
+                        // not open. In full auto this same block closed it on
+                        // the PREVIOUS tick, because the ordering inside one
+                        // Think is:
+                        //
+                        //   Process shots  -> set synthetic token, force 2048
+                        //   PlayerAttack   -> token present, so the else-branch
+                        //                     pushes m_flNextSecondaryAttack to
+                        //                     NewAttack (~+0.133s)
+                        //   ...end of block -> the token is deleted
+                        //
+                        // so on the next tick a genuine right-click correctly
+                        // reads as NOT synthetic and lands here - but the gate
+                        // shut a tick ago and merely declining to shut it again
+                        // never reopens it. Every auto cycle re-closes it, so
+                        // the shove is starved exactly as before.
+                        //
+                        // Pull both gates back to now so the press resolves on
+                        // this tick.
+                        local nowRS = Time()
+                        if(NetProps.GetPropFloat(weapon, "m_flNextSecondaryAttack") > nowRS)
+                            NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", nowRS);
+                        if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowRS)
+                            NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowRS);
+                        // The shove penalty also silently eats right-clicks.
+                        if(NetProps.GetPropInt(greenyoshiyt, "m_iShovePenalty") > 0)
+                            NetProps.SetPropInt(greenyoshiyt, "m_iShovePenalty", 0);
+
+                        ::ScarDbgOnce("atk_genuine",
+                            "PlayerAttack: GENUINE right-click -> gates pulled back to now", 40)
                     }
                     else
                     {
@@ -706,6 +737,36 @@ if (!("ScarDbgLastState" in getroottable()))
                                 ::ScarDbgOnce("think_real_shove",
                                     "PlayerThink: GENUINE right-click seen", 60)
                                 ::ScarDbgShoveGates(greenyoshiyt, "PlayerThink")
+
+                                // v7 - second, unconditional clearing point.
+                                //
+                                // PlayerAttack only runs for players currently
+                                // in that table, and in full auto the gate is
+                                // re-closed on every cycle. This pass runs each
+                                // tick for anyone holding a SCAR, whatever the
+                                // fire mode, so a genuine press is guaranteed a
+                                // frame where the engine can actually see it.
+                                //
+                                // Only ever RELAXES a restriction, so it cannot
+                                // affect firing rhythm.
+                                if(NetProps.GetPropFloat(weapon, "m_flNextSecondaryAttack") > nowT3)
+                                {
+                                    NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", nowT3)
+                                    ::ScarDbgOnce("think_open_sec",
+                                        "PlayerThink: secondary gate was shut -> opened for real shove", 40)
+                                }
+                                if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT3)
+                                {
+                                    NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowT3)
+                                    ::ScarDbgOnce("think_open_master",
+                                        "PlayerThink: master gate was shut -> opened for real shove", 40)
+                                }
+                                if(NetProps.GetPropInt(greenyoshiyt, "m_iShovePenalty") > 0)
+                                {
+                                    NetProps.SetPropInt(greenyoshiyt, "m_iShovePenalty", 0)
+                                    ::ScarDbgOnce("think_penalty",
+                                        "PlayerThink: shove penalty cleared", 40)
+                                }
                             }
 
                             if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT3 + 5.0)
@@ -821,15 +882,13 @@ if (!("ScarDbgLastState" in getroottable()))
                 currentmode = greenyoshiyt_scarL_mode.Const.bot_default_fire_mode
             }
 
-            // v6: the v5 log recorded 70 rifle_desert shots and not one single
-            // Observe-pass line, which can only happen if this branch is not
-            // being taken. Everything the shove fixes touch lives downstream of
-            // it, so if the weapon is in BURST mode (currentmode 0) none of
-            // that code has ever executed and the shove problem is somewhere
-            // else entirely. Report the mode so this stops being a guess.
+            // Report the fire mode. NOTE: the v6 comment here claimed the log
+            // showed burst mode. That was wrong - it inferred the mode from an
+            // absent Observe log line that v5 had itself deleted. The log
+            // actually shows runs of 14 consecutive shots, which only full auto
+            // can produce. Kept purely as a fact in the log, not as a premise.
             ::ScarDbgOnce("firemode", "weapon_fire: fire mode = " + currentmode
-                + (currentmode == 1 ? " (FULL AUTO - shove pipeline active)"
-                                    : " (BURST - shove pipeline SKIPPED)"))
+                + (currentmode == 1 ? " (FULL AUTO)" : " (BURST)"))
 
             if(currentmode == 1)
             {
