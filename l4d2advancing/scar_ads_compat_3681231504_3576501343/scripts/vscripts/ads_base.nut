@@ -236,15 +236,11 @@ New/Modify animations:
 	FovScaling = 0
 	FovADS = 75
 	FovDefault = -1
-	RecoilFactor = 0.8			// same as ads_recoil_modifier "0.5" // Recoil modifier while in ads.
-								// RAISED 0.5 -> 0.8 on request: ADS recoil was too weak.
-								// This is the single value that governs it. Every shot fired
-								// while aiming has its punch rewritten as
-								//     last_recoil + (thisShot * RecoilFactor)
-								// so 0.5 was discarding half of the climb. The "laser" case is
-								// the same code path: the laser sight is what SpreadReduce hands
-								// out on entering ADS, so aiming with it applies this factor too.
-								// 1.0 would mean ADS and hip-fire recoil identically.
+	RecoilFactor = 0.5			// same as ads_recoil_modifier "0.5" // Recoil modifier while in ads.
+								// LEFT AT STOCK 0.5 deliberately. This scales PER-SHOT strength,
+								// which is not what governs the peak elevation of a burst - see
+								// SR_ADS_CLIMB in smooth_recoil_punch.nut, which is the knob that
+								// actually raises the ceiling while leaving single-shot feel alone.
 	SpreadReduce = 1			// cannot change spread & pellet scatter with vscript, but I will give you a laser sight.
 									// ads_spread_modifier "0.1" // Spread modifier while in ads.
 									// ads_pellet_scatter_modifier "0.5" // Pellet scatter modifier while in ads.
@@ -3502,7 +3498,7 @@ New/Modify animations:
 				"\tFovScaling = 0",
 				"\tFovADS = 75",
 				"\tFovDefault = -1",
-				"\tRecoilFactor = 0.8",
+				"\tRecoilFactor = 0.5",
 				"\tSpreadReduce = 1",
 				"\tHideLaserSight = 1",
 				"\tHideBulletTracers = 0",

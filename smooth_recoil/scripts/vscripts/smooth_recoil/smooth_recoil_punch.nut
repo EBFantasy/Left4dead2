@@ -56,7 +56,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	::SmoothRecoilPunch <- {};
 }
 
-::SmoothRecoilPunch.rawset("VERSION", "0.9.4-punch");
+::SmoothRecoilPunch.rawset("VERSION", "0.9.5-punch");
 ::SmoothRecoilPunch.rawset("DEBUG", true);
 
 // Netprop paths. The "localdata." prefix is required: these live in the
@@ -167,6 +167,40 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 ::SmoothRecoilPunch.rawset("MAX_PITCH", 24.0);
 ::SmoothRecoilPunch.rawset("SOFT_START", 13.0);
 
+//-----------------------------------------------------------------------------
+// Sustained-fire climb  (v0.9.5)
+//
+// WHAT THIS FIXES
+// The peak elevation of a long burst was too low, especially while aiming.
+//
+// WHY RAISING PER-SHOT STRENGTH IS THE WRONG ANSWER
+// The engine spring pulls back in proportion to the CURRENT angle:
+//
+//     m_vecPunchAngleVel -= m_vecPunchAngle * min(65.0*frametime, 2.0)
+//
+// so during sustained fire the view parks at the equilibrium where per-shot
+// push equals spring pull. Measured from the tuning in this file that lands at
+// about 3.7 degrees for the SCAR and 6.4 for the m60 - nowhere near MAX_PITCH
+// (24). The ceiling was never a clamp; it is the spring balance. Turning up
+// the per-shot kick does raise it, but it also makes every individual shot
+// snappier, which is not what was asked for.
+//
+// WHAT THIS DOES INSTEAD
+// Adds a small extra pitch that grows with the length of the burst and decays
+// once firing stops. Shot 1 is completely untouched, so tap-firing and the
+// first round of a burst feel exactly as before, while a held trigger walks
+// the view visibly higher.
+//
+// CLIMB_ADS applies while aiming (ADS or laser). It is deliberately LARGER
+// than the hip value: ads_base.nut rewrites every aimed shot as
+//     last_recoil + (thisShot * RecoilFactor)
+// with RecoilFactor 0.5, which halves the per-shot contribution and is why the
+// aimed ceiling sat lowest of all. Compensating here - rather than by raising
+// RecoilFactor - keeps ADS single-shot recoil at its stock, calmer value.
+::SmoothRecoilPunch.rawset("CLIMB_HIP", 0.55);   // extra degrees at full burst, hip
+::SmoothRecoilPunch.rawset("CLIMB_ADS", 1.30);   // extra degrees at full burst, aiming
+::SmoothRecoilPunch.rawset("CLIMB_SHOTS", 9.0);  // rounds to reach full climb
+
 // Anomaly backstop: the largest single-frame climb allowed, as a MULTIPLE of
 // the weapon's own base kick.
 //
@@ -241,6 +275,45 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	return "default_weapon";
 });
 
+// True while the player is aiming down sights.
+//
+// The ADS addon keeps its per-player state at
+//     ::L4D2Lxc_ADS.HumanSurvivors[userid].weapon.ads_on
+// which is reachable from the root table, so no coupling between the two
+// addons is needed beyond this read. Everything is guarded: if the ADS addon
+// is not installed, or its internals move in a future version, this simply
+// reports false and the hip-fire climb is used. Recoil never breaks because of
+// it.
+::SmoothRecoilPunch.rawset("IsAdsActive", function (player) {
+	try {
+		if (!("L4D2Lxc_ADS" in getroottable()))
+			return false;
+
+		local ads = ::L4D2Lxc_ADS;
+		if (!("HumanSurvivors" in ads))
+			return false;
+
+		local id = player.GetPlayerUserId();
+		if (!(id in ads.HumanSurvivors))
+			return false;
+
+		local scope = ads.HumanSurvivors[id];
+		if (!("weapon" in scope))
+			return false;
+
+		local w = scope.weapon;
+		if (!("ads_on" in w))
+			return false;
+
+		// ads_on is written as both a bool and an int in that codebase.
+		local v = w.ads_on;
+		if (typeof(v) == "bool")
+			return v;
+		return (v != 0);
+	} catch (e) { }
+	return false;
+});
+
 ::SmoothRecoilPunch.rawset("StateOf", function (player) {
 	local id = -1;
 	try { id = player.GetEntityIndex(); } catch (e) { return null; }
@@ -253,6 +326,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			weapon = "",
 			pending = 0,     // rounds seen but not yet paid out (one per frame)
 			lastAng = 0.0,   // previous punch pitch, for step diagnostics
+			ads = false,     // aiming at the time of the last shot
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -311,6 +385,25 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 
 	local pitch = basePitch * ramp;
 
+	// Sustained-fire climb.
+	//
+	// Raises where a burst TOPS OUT without changing how a single shot feels.
+	// The engine spring settles the view at the point where per-shot push
+	// balances spring pull, so adding a term that only grows with burst length
+	// moves that balance point upward while leaving shot 1 identical.
+	local aiming = ::SmoothRecoilPunch.IsAdsActive(player);
+	state.ads = aiming;
+
+	local climbMax = aiming
+		? ::SmoothRecoilPunch.CLIMB_ADS
+		: ::SmoothRecoilPunch.CLIMB_HIP;
+
+	if (climbMax > 0.0 && state.shots > 1) {
+		local prog = (state.shots - 1).tofloat() / ::SmoothRecoilPunch.CLIMB_SHOTS;
+		if (prog > 1.0) prog = 1.0;
+		pitch = pitch - (climbMax * prog);
+	}
+
 	// Alternate horizontal direction so a spray snakes instead of drifting
 	// one way, and vary it a little so it does not look mechanical.
 	local dir = (state.shots % 2 == 0) ? 1.0 : -1.0;
@@ -352,7 +445,11 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		// --- 1. anomaly backstop -------------------------------------------
 		// Scaled to this weapon's own kick so the spray ramp is preserved.
 		// Only a genuinely doubled application trips this.
-		local stepCap = basePitch * ::SmoothRecoilPunch.MAX_STEP_FACTOR;
+		//
+		// The sustained-fire climb is added to the allowance, otherwise this
+		// backstop would cap exactly the growth the climb is there to produce
+		// and the ceiling would not move at all.
+		local stepCap = (basePitch * ::SmoothRecoilPunch.MAX_STEP_FACTOR) - climbMax;
 		if (stepCap > 0.0) stepCap = -stepCap;      // basePitch is negative
 		if (step < stepCap) {
 			step = stepCap;
@@ -446,7 +543,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		}
 
 		::SmoothRecoilPunch.Dbg("shot#" + state.shots + " " + cls
-			+ " req=" + pitch + " applied=" + step
+			+ (aiming ? " ADS" : " hip") + " req=" + pitch + " applied=" + step
 			+ " | ang=" + rbX + " step=" + realStep
 			+ " vel=" + rbV + " queued=" + state.pending + flag);
 	}
