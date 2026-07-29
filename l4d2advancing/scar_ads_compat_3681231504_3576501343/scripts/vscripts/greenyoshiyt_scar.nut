@@ -14,6 +14,47 @@
 if (!("ScarAutoSyntheticShove" in getroottable()))
     ::ScarAutoSyntheticShove <- {}
 
+// ---------------------------------------------------------------------------
+// Shove diagnostics.  Toggle in console:   script ScarShoveDebug <- true
+//
+// Logs every point on the path a real right-click has to survive, so the next
+// console.log shows exactly where it is being lost instead of us guessing.
+// Rate-limited so a long session cannot flood the console.
+// ---------------------------------------------------------------------------
+if (!("ScarShoveDebug" in getroottable()))
+    ::ScarShoveDebug <- true
+
+if (!("ScarShoveDebugCount" in getroottable()))
+    ::ScarShoveDebugCount <- 0
+
+::ScarDbg <- function (msg)
+{
+    if (!::ScarShoveDebug) return
+    if (::ScarShoveDebugCount >= 120) return
+    ::ScarShoveDebugCount++
+    printl("[SCARDBG] " + msg)
+}
+
+// Reports whether the engine would currently accept a shove, and why not.
+::ScarDbgAttackState <- function (player, tag)
+{
+    if (!::ScarShoveDebug) return
+    try
+    {
+        local now = Time()
+        local nextAtk = NetProps.GetPropFloat(player, "m_flNextAttack")
+        local wep = player.GetActiveWeapon()
+        local nextSec = (wep != null) ? NetProps.GetPropFloat(wep, "m_flNextSecondaryAttack") : -1.0
+        local nextPri = (wep != null) ? NetProps.GetPropFloat(wep, "m_flNextPrimaryAttack") : -1.0
+        ::ScarDbg(tag
+            + " now=" + now
+            + " nextAttack=" + nextAtk + (nextAtk > now ? " [BLOCKED +" + (nextAtk - now) + "s]" : " [ok]")
+            + " nextSecondary=" + nextSec + (nextSec > now ? " [BLOCKED]" : " [ok]")
+            + " nextPrimary=" + nextPri)
+    }
+    catch (e) { }
+}
+
 ::greenyoshiyt_scarL_mode <-
 {
     Setting =
@@ -278,10 +319,34 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
                                         // shove through on this very tick.
                                         if(button & 2048)
                                         {
+                                            ::ScarDbg("Observe: real shove detected -> clearing any park NOW")
+                                            ::ScarDbgAttackState(greenyoshiyt, "  before-clear")
+
+                                            // Skipping the park is not enough on
+                                            // its own: an earlier tick may have
+                                            // already parked the timers 100s out,
+                                            // and the player's shove would still
+                                            // be gated by that stale value. Pull
+                                            // them back to now so the shove is
+                                            // accepted on this very tick.
+                                            local nowT = Time()
+                                            local wpn = greenyoshiyt.GetActiveWeapon()
+                                            if(wpn != null)
+                                            {
+                                                if(NetProps.GetPropFloat(wpn, "m_flNextSecondaryAttack") > nowT)
+                                                    NetProps.SetPropFloat(wpn, "m_flNextSecondaryAttack", nowT)
+                                                if(NetProps.GetPropFloat(wpn, "m_flNextPrimaryAttack") > nowT)
+                                                    NetProps.SetPropFloat(wpn, "m_flNextPrimaryAttack", nowT)
+                                            }
+                                            if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT)
+                                                NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowT)
+
+                                            ::ScarDbgAttackState(greenyoshiyt, "  after-clear")
                                             greenyoshiyt_scarL_mode.FoundSurvivors[greenyoshiyt].Releasing = 0
                                         }
                                         else
                                         {
+                                            ::ScarDbg("Observe: no shove -> parking attack 100s (this is what blocks a shove pressed later)")
                                             NetProps.SetPropFloat(greenyoshiyt.GetActiveWeapon(), "m_flNextPrimaryAttack", Time() + 100.0);
                                             NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", Time() + 100.0);
                                         }
@@ -308,6 +373,8 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
                 local weapon = greenyoshiyt.GetActiveWeapon()
                 if(weapon != null)
                 {
+                    if((button & 2048) && NewAttack > Time())
+                        ::ScarDbg("PlayerAttack: shove held but re-setting timers to " + NewAttack + " (delta +" + (NewAttack - Time()) + "s)")
                     NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", NewAttack);
                     NetProps.SetPropFloat(weapon, "m_flNextPrimaryAttack", NewAttack);
                     NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", NewAttack);
@@ -451,6 +518,8 @@ if (!("ScarAutoSyntheticShove" in getroottable()))
                             {
                                 if((button & 1) || (button & 2048) || (button & 8192) || NetProps.GetPropInt(greenyoshiyt.GetActiveWeapon(), "m_iClip1") == 0)
                                 {
+                                    ::ScarDbg("PlayerThink: releasing park -> " + (stat.LastShot + 0.10)
+                                        + (((stat.LastShot + 0.10) > Time()) ? " [STILL IN FUTURE +" + ((stat.LastShot + 0.10) - Time()) + "s]" : " [immediate]"))
                                     NetProps.SetPropFloat(greenyoshiyt.GetActiveWeapon(), "m_flNextPrimaryAttack", stat.LastShot + 0.10);
                                     NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", stat.LastShot + 0.10);
 
