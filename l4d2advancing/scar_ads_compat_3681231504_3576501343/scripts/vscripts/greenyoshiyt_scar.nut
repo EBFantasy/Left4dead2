@@ -317,9 +317,13 @@ if (!("ScarShoveDebugCount" in getroottable()))
                                         // If the player is shoving right now, do
                                         // not park the timers at all - let the
                                         // shove through on this very tick.
-                                        if(button & 2048)
+                                        // Same correction as the PlayerAttack pass:
+                                        // a forced bit reads identically to a real
+                                        // press, so the token has to be subtracted
+                                        // before this can be called genuine.
+                                        if((button & 2048) && !(greenyoshiyt.GetEntityIndex() in ::ScarAutoSyntheticShove))
                                         {
-                                            ::ScarDbg("Observe: real shove detected -> clearing any park NOW")
+                                            ::ScarDbg("Observe: GENUINE right-click -> clearing any park NOW")
                                             ::ScarDbgAttackState(greenyoshiyt, "  before-clear")
 
                                             // Skipping the park is not enough on
@@ -346,9 +350,36 @@ if (!("ScarShoveDebugCount" in getroottable()))
                                         }
                                         else
                                         {
-                                            ::ScarDbg("Observe: no shove -> parking attack 100s (this is what blocks a shove pressed later)")
+                                            // v0.9.4 - PARK THE PRIMARY ONLY.
+                                            //
+                                            // This is the real cause of the dead
+                                            // right-click, and the engine source
+                                            // says exactly why:
+                                            //
+                                            //   CBasePlayer::ItemPostFrame()
+                                            //     if (curtime < m_flNextAttack)
+                                            //         weapon->ItemBusyFrame();
+                                            //     else
+                                            //         weapon->ItemPostFrame();
+                                            //
+                                            // and IN_ATTACK2 is only ever tested
+                                            // inside the weapon's ItemPostFrame.
+                                            // So m_flNextAttack is a MASTER gate:
+                                            // parking it 100s out does not merely
+                                            // delay the shove, it stops the engine
+                                            // from ever looking at the shove
+                                            // button. The old log shows this
+                                            // parking happening 33 times while the
+                                            // release path ran only 3 times.
+                                            //
+                                            // Holding back the next semi-auto
+                                            // round only requires the weapon's own
+                                            // m_flNextPrimaryAttack, which gates
+                                            // PrimaryAttack() and nothing else.
+                                            // Leaving m_flNextAttack alone keeps
+                                            // the shove path - and reload - alive
+                                            // with no change to firing behaviour.
                                             NetProps.SetPropFloat(greenyoshiyt.GetActiveWeapon(), "m_flNextPrimaryAttack", Time() + 100.0);
-                                            NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", Time() + 100.0);
                                         }
                                     }
                                 }
@@ -392,17 +423,35 @@ if (!("ScarShoveDebugCount" in getroottable()))
                     // secondary-attack gate open. The primary timers still get
                     // the value they need for the animation and the burst
                     // rhythm, so semi-auto behaviour is unchanged.
-                    local realShove = (button & 2048) ? true : false
+                    // v0.9.4 - the v0.9.3 test here was matching the WRONG thing.
+                    //
+                    // The engine ORs the forced bits into the command before the
+                    // button state the script can read is assigned:
+                    //
+                    //   CPlayerMove::RunCommand()
+                    //     ucmd->buttons |= player->m_afButtonForced;   // first
+                    //   CBasePlayer::UpdateButtonState()
+                    //     m_nButtons = nUserCmdButtonMask;             // then
+                    //
+                    // GetButtonMask() reads the result, so the shove this script
+                    // synthesises for its own auto rhythm is indistinguishable
+                    // from a right-click the player pressed. That is why the last
+                    // log shows "real shove held" 84 times and the Observe-side
+                    // "real shove detected" exactly 0 times: all 84 were the
+                    // script recognising its own synthetic shove, and a genuine
+                    // press was never actually identified even once.
+                    //
+                    // ::ScarAutoSyntheticShove is the token already set when the
+                    // synthetic bit goes on. Subtracting it leaves only presses
+                    // that really came from the player's mouse.
+                    local synthetic = (greenyoshiyt.GetEntityIndex() in ::ScarAutoSyntheticShove)
+                    local realShove = ((button & 2048) && !synthetic) ? true : false
 
                     if(realShove)
                     {
-                        ::ScarDbg("PlayerAttack: real shove held -> leaving secondary gate OPEN (was pushing +"
-                            + (NewAttack - Time()) + "s)")
-                        local nowT2 = Time()
-                        if(NetProps.GetPropFloat(weapon, "m_flNextSecondaryAttack") > nowT2)
-                            NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", nowT2);
-                        if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT2)
-                            NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowT2);
+                        ::ScarDbg("PlayerAttack: GENUINE right-click -> secondary gate left open")
+                        // Do not touch the secondary gate or the master gate at
+                        // all; the shove is allowed to resolve this tick.
                     }
                     else
                     {
@@ -557,6 +606,33 @@ if (!("ScarShoveDebugCount" in getroottable()))
 
                                     stat.Releasing = 0
                                 }
+                            }
+
+                            // v0.9.4 - stale-gate safety net.
+                            //
+                            // Everything above only runs while Releasing == 1.
+                            // If that state is lost while a park is still out -
+                            // weapon swap, death, incap, fire-mode change, a
+                            // dropped tick - the timers stay 100 seconds in the
+                            // future and the player's right-click is dead until
+                            // the round ends. This is the failure that survives
+                            // every previous fix because it happens outside the
+                            // path those fixes touch.
+                            //
+                            // A parked value is unmistakable: nothing in normal
+                            // play schedules an attack more than a couple of
+                            // seconds out. Anything beyond that is a leftover, so
+                            // pull it back.
+                            local nowT3 = Time()
+                            if(NetProps.GetPropFloat(greenyoshiyt, "m_flNextAttack") > nowT3 + 5.0)
+                            {
+                                ::ScarDbg("PlayerThink: STALE master gate found -> clearing")
+                                NetProps.SetPropFloat(greenyoshiyt, "m_flNextAttack", nowT3)
+                            }
+                            if(NetProps.GetPropFloat(weapon, "m_flNextSecondaryAttack") > nowT3 + 5.0)
+                            {
+                                ::ScarDbg("PlayerThink: STALE secondary gate found -> clearing")
+                                NetProps.SetPropFloat(weapon, "m_flNextSecondaryAttack", nowT3)
                             }
 
                             

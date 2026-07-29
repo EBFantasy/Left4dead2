@@ -56,7 +56,7 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 	::SmoothRecoilPunch <- {};
 }
 
-::SmoothRecoilPunch.rawset("VERSION", "0.9.0-punch");
+::SmoothRecoilPunch.rawset("VERSION", "0.9.4-punch");
 ::SmoothRecoilPunch.rawset("DEBUG", true);
 
 // Netprop paths. The "localdata." prefix is required: these live in the
@@ -77,9 +77,26 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 // longer an instant-vs-ramp split. Retained only so old configs do not error.
 ::SmoothRecoilPunch.rawset("INSTANT_FRACTION", 0.0);
 
-// Extra velocity added alongside the angle. Ignored where the server cannot
-// drive velocity; harmless there. 0 disables it.
-::SmoothRecoilPunch.rawset("VEL_ASSIST", 0.35);
+// Extra velocity added alongside the angle.
+//
+// v0.9.4 - REDUCED, and the clamp tightened from 400 to VEL_CLAMP.
+//
+// The readback proved this was running away. Across one m60 burst the stored
+// velocity went -77 -> -400 and then sat at -400 permanently, never decaying.
+// The engine integrates that every tick inside DecayPunchAngle:
+//
+//     m_vecPunchAngle += m_vecPunchAngleVel * frametime
+//     -400 * 0.015 = -6 degrees PER TICK
+//
+// so between two shots the angle shot far past our ceiling, and the next
+// shot's write yanked it back to the clamp. Overshoot, snap back, overshoot -
+// that is the "some shots jump hard" feel, and it is why the jump was
+// intermittent rather than every shot.
+//
+// A small bounded value still gives the smooth accelerating onset that makes
+// this feel like a modern shooter, but now it decays instead of saturating.
+::SmoothRecoilPunch.rawset("VEL_ASSIST", 0.18);
+::SmoothRecoilPunch.rawset("VEL_CLAMP", 110.0);
 
 // Per-shot climb, in degrees. Negative pitch moves the view UP.
 // Reused from the existing core so the feel stays comparable.
@@ -135,8 +152,32 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 ::SmoothRecoilPunch.rawset("RAMP_MAX", 2.20);        // capped at 220%
 ::SmoothRecoilPunch.rawset("BURST_RESET", 0.35);     // seconds of quiet to reset
 
-// Safety clamp so a bad config can never throw the view to the sky.
+// Safety ceiling so a bad config can never throw the view to the sky.
+//
+// v0.9.4: this is now a SOFT ceiling, not a wall.
+//
+// The m60 trace shows exactly why the old hard clamp was wrong. Shots 1-10
+// climbed normally, shot 11 hit -24.0, and shots 12 through 22 produced a
+// step of EXACTLY 0.00 degrees - eleven consecutive rounds with no visible
+// recoil at all. Firing feels like it "locks up" partway through a long burst.
+//
+// SOFT_START is where compression begins. Between SOFT_START and MAX_PITCH the
+// remaining headroom is approached asymptotically, so late shots in a long
+// burst still move the view a little instead of doing nothing.
 ::SmoothRecoilPunch.rawset("MAX_PITCH", 24.0);
+::SmoothRecoilPunch.rawset("SOFT_START", 13.0);
+
+// Anomaly backstop: the largest single-frame climb allowed, as a MULTIPLE of
+// the weapon's own base kick.
+//
+// This is deliberately relative rather than a fixed number of degrees. A flat
+// cap that suits the pistol would erase the m60's spray growth completely, and
+// one that suits the m60 would never catch a pistol double-step.
+//
+// The real double-application is fixed at source (Tick now pays out one round
+// per frame), so this only has to catch anything that still slips through -
+// a doubled kick would arrive at about 2.0x base, well above this line.
+::SmoothRecoilPunch.rawset("MAX_STEP_FACTOR", 1.45);
 
 // v0.9.2: the re-assert experiment is REMOVED.
 //
@@ -210,6 +251,8 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			lastShot = 0.0,
 			clip = -1,
 			weapon = "",
+			pending = 0,     // rounds seen but not yet paid out (one per frame)
+			lastAng = 0.0,   // previous punch pitch, for step diagnostics
 		};
 	}
 	return ::SmoothRecoilPunch._players[id];
@@ -279,6 +322,10 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		pitch = -::SmoothRecoilPunch.MAX_PITCH;
 	}
 
+	// Declared out here so the diagnostic below can report what was actually
+	// applied after the soft ceiling and the per-frame step limit had their say.
+	local step = pitch;
+
 	local instant = ::SmoothRecoilPunch.INSTANT_FRACTION;
 	local viaVel = 1.0 - instant;
 
@@ -302,11 +349,40 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 			ang = Vector(0, 0, 0);
 		}
 
-		local newX = ang.x + pitch;
+		// --- 1. anomaly backstop -------------------------------------------
+		// Scaled to this weapon's own kick so the spray ramp is preserved.
+		// Only a genuinely doubled application trips this.
+		local stepCap = basePitch * ::SmoothRecoilPunch.MAX_STEP_FACTOR;
+		if (stepCap > 0.0) stepCap = -stepCap;      // basePitch is negative
+		if (step < stepCap) {
+			step = stepCap;
+		}
+
+		// --- 2. soft ceiling ----------------------------------------------
+		// Below SOFT_START the kick applies at full strength. Above it, the
+		// kick is scaled by how much headroom is left, so the view keeps
+		// creeping upward during a long burst instead of freezing dead.
+		local soft = ::SmoothRecoilPunch.SOFT_START;
+		local hard = ::SmoothRecoilPunch.MAX_PITCH;
+		local cur  = -ang.x;             // positive = how high the view sits
+		if (cur < 0.0) cur = 0.0;
+
+		if (cur > soft) {
+			local headroom = hard - soft;
+			local used     = cur - soft;
+			local left     = 1.0 - (used / headroom);
+			if (left < 0.04) left = 0.04;   // never fully zero
+			if (left > 1.0)  left = 1.0;
+			step = step * left;
+		}
+
+		local newX = ang.x + step;
 		local newY = ang.y + yaw;
 
-		if (newX < -::SmoothRecoilPunch.MAX_PITCH) {
-			newX = -::SmoothRecoilPunch.MAX_PITCH;
+		// Absolute backstop. With the soft curve above this should not be
+		// reached in normal play.
+		if (newX < -hard) {
+			newX = -hard;
 		}
 		if (newX > 0.0) {
 			newX = 0.0;      // never push the view downward
@@ -323,10 +399,16 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 				vel = Vector(0, 0, 0);
 			}
 			// Clamp so a discarded write cannot accumulate without bound.
-			local vx = vel.x + (pitch * ::SmoothRecoilPunch.VEL_ASSIST * 20.0);
-			local vy = vel.y + (yaw   * ::SmoothRecoilPunch.VEL_ASSIST * 20.0);
-			if (vx < -400.0) { vx = -400.0; }
-			if (vx >  400.0) { vx =  400.0; }
+			// v0.9.4: the old 400 limit was far too loose - the log shows the
+			// value pinned at -400 for the entire back half of a burst, which
+			// the engine kept integrating into the angle at ~6 deg/tick.
+			local vc = ::SmoothRecoilPunch.VEL_CLAMP;
+			local vx = vel.x + (step * ::SmoothRecoilPunch.VEL_ASSIST * 20.0);
+			local vy = vel.y + (yaw  * ::SmoothRecoilPunch.VEL_ASSIST * 20.0);
+			if (vx < -vc) { vx = -vc; }
+			if (vx >  vc) { vx =  vc; }
+			if (vy < -vc) { vy = -vc; }
+			if (vy >  vc) { vy =  vc; }
 			NetProps.SetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL,
 				Vector(vx, vy, vel.z));
 		}
@@ -342,16 +424,31 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		// Read the values straight back. If these come back as zero the write
 		// is not landing at all; if they hold the value but the view does not
 		// move, the client's prediction is overwriting it.
-		local rbAng = "n/a";
-		local rbVel = "n/a";
+		// v0.9.4: log the STEP the view actually took, not just the absolute
+		// angle. A jolt is a step much larger than its neighbours, and that is
+		// impossible to see from absolute values alone - which is why the
+		// earlier logs could not settle whether the jumping was real.
+		local rbX = 0.0;
+		local rbV = 0.0;
 		try {
-			rbAng = "" + NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH);
-			rbVel = "" + NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL);
+			rbX = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH).x;
+			rbV = NetProps.GetPropVector(player, ::SmoothRecoilPunch.PROP_PUNCH_VEL).x;
 		} catch (e) { }
 
+		local realStep = rbX - state.lastAng;
+		state.lastAng = rbX;
+
+		local flag = "";
+		if (realStep < -(::SmoothRecoilPunch.MAX_STEP_FACTOR * -basePitch + 0.35)) {
+			flag = "  <<JOLT";
+		} else if (state.shots > 1 && realStep > -0.05) {
+			flag = "  <<FROZEN";
+		}
+
 		::SmoothRecoilPunch.Dbg("shot#" + state.shots + " " + cls
-			+ " pitch=" + pitch + " yaw=" + yaw + " ramp=" + ramp
-			+ " | readback ang=" + rbAng + " vel=" + rbVel);
+			+ " req=" + pitch + " applied=" + step
+			+ " | ang=" + rbX + " step=" + realStep
+			+ " vel=" + rbV + " queued=" + state.pending + flag);
 	}
 
 	return true;
@@ -424,11 +521,23 @@ if (!("SmoothRecoilPunch" in getroottable())) {
 		}
 
 		if (clip < state.clip) {
-			local shots = state.clip - clip;
-			if (shots > 5)
-				shots = 5;      // guard against a resync being read as a burst
-			for (local i = 0; i < shots; i++)
-				::SmoothRecoilPunch.ApplyShot(player, wname);
+			// v0.9.4: apply ONE kick per frame, no matter how many rounds the
+			// poll saw leave the magazine.
+			//
+			// The old loop ran ApplyShot up to five times in a single frame.
+			// Every one of those writes landed on the same tick, so the view
+			// took one giant step instead of several smooth ones - the
+			// intermittent hard jolt in the report. Rounds beyond the first
+			// are carried over and paid out on following frames, which keeps
+			// the spray ramp honest without ever double-stepping the view.
+			state.pending += (state.clip - clip);
+			if (state.pending > 5)
+				state.pending = 5;   // a resync must not read as a huge burst
+		}
+
+		if (state.pending > 0) {
+			state.pending -= 1;
+			::SmoothRecoilPunch.ApplyShot(player, wname);
 		}
 
 		state.clip = clip;
